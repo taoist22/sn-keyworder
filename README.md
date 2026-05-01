@@ -1,52 +1,58 @@
 # Keyworder for Supernote
 
-**Keyworder** is a productivity utility for Supernote devices that allows you to tag note pages with your most-used keywords in a single tap. It bridges the gap between your personal organizational system and the Supernote's native indexing.
+**Keyworder** is a productivity plugin for the Supernote Nomad that lets you stamp your most-used keywords onto a note page with a single tap, and automatically adds them to the device's native keyword navigation index.
+
+> **Pre-release:** This plugin requires the Supernote beta firmware and is not yet intended for general use.
 
 ## Features
 
-- **One-Tap Tagging:** Instantly insert a keyword onto the current page without using the lasso or handwriting recognition.
-- **Global Palette:** Maintain a consistent list of keywords available across all your notes.
-- **Native Index Integration:** Automatically adds keywords to the device's internal keyword index for native navigation.
-- **Favorites & Pinning:** Keep your high-frequency tags at the top for zero-scroll access.
-- **A-Z Jump Row:** Quickly navigate large keyword collections with alphabetical shortcuts.
+- **One-tap tagging** — insert a keyword onto the current page instantly, no lasso or handwriting recognition needed
+- **Native index integration** — automatically adds each keyword to the device's built-in keyword index for page navigation
+- **Pinned keywords** — keep your most-used keywords at the top of the list for zero-scroll access
+- **A-Z jump row** — quickly navigate large keyword lists with alphabetical shortcuts
 
 ## Installation
 
-1. Build the plugin (see below) or download the `Keyworder.snplg` file.
-2. Connect your Supernote to your computer via USB.
-3. Copy `Keyworder.snplg` into the `Plugins` folder on your Supernote's internal storage.
-4. On your device, ensure the plugin is active under **Settings > Apps > Plugins**.
+1. Download `Keyworder.snplg` from the [latest release](https://github.com/taoist22/sn-keyworder/releases).
+2. Connect your Supernote to your computer using the Supernote Partner app or Browse & Access.
+3. Copy `Keyworder.snplg` into the `MyStyle` folder on your device.
+4. On your Supernote, open a note, tap the **plugin icon** in the toolbar, go to **Manage Plugins**, tap **Add Plugin**, and select `Keyworder`.
+
+## Setting Up Your Keywords
+
+Keyworder uses a `keywords.json` file stored on your device to populate the keyword list. Use the **Keyword Builder** web tool to create and manage this file:
+
+**[Open the Keyword Builder](https://taoist22.github.io/sn-keyworder/keyword-tool.html)**
+
+1. **Launch the plugin first** — open a note, tap the plugin icon, and open Keyworder. This creates the `MyStyle/SnKeyworder/` folder on your device automatically.
+2. Go to the Keyword Builder, add your keywords, and click **Download keywords.json**.
+3. Connect your Supernote via the Partner app or Browse & Access.
+4. Copy `keywords.json` into `MyStyle/SnKeyworder/` on your device.
+5. Close and reopen the plugin — your keywords will load automatically.
+
+To update your keywords later, return to the Keyword Builder (your list will still be there), make your changes, download the updated file, and copy it back to the same folder.
 
 ## Usage
 
-1. Tap the **Tag** icon in your Supernote toolbar.
-2. Select a keyword from your list.
-3. The plugin will stamp the text at the bottom of the page and add it to the native keyword index.
-4. Tap **Manage** to add, delete, or pin keywords.
+1. Open a note and tap the **plugin icon** in the toolbar.
+2. Select a keyword from the list.
+3. The plugin stamps the keyword at the bottom of the page — move it to your desired location. It is also added to the native keyword navigation index.
 
-## Development
+## Building from Source
 
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) (v18+)
 - npm
 
-### Build Instructions
+### Build
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Run the build script:
-   ```bash
-   chmod +x buildPlugin.sh
-   ./buildPlugin.sh
-   ```
-3. The installer will be generated at `build/outputs/Keyworder.snplg`.
+```bash
+npm install
+./buildPlugin.sh
+```
 
-## Technical Note
-
-This plugin is built using the **Supernote Plugin SDK** (`sn-plugin-lib`). It leverages the `PluginNoteAPI` for text insertion and the `PluginFileAPI` for native keyword indexing.
+The plugin file will be generated at `build/outputs/Keyworder.snplg`.
 
 ## License
 
