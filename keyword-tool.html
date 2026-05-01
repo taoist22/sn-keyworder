@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Supernote Keyworder — Keyword Builder</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f0;
+      color: #222;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 16px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+      padding: 32px;
+      width: 100%;
+      max-width: 520px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      font-size: 0.9rem;
+      color: #666;
+      margin-bottom: 28px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: #444;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      border: 1px solid #ccc;
+      border-radius: 7px;
+      padding: 10px 12px;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input[type="text"]:focus { border-color: #c0392b; }
+
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 7px;
+      padding: 10px 18px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      transition: background 0.15s, opacity 0.15s;
+    }
+
+    .btn-add {
+      background: #c0392b;
+      color: #fff;
+      white-space: nowrap;
+    }
+
+    .btn-add:hover { background: #a93226; }
+
+    .keyword-list {
+      list-style: none;
+      margin-bottom: 24px;
+      min-height: 40px;
+    }
+
+    .keyword-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 12px;
+      border-radius: 7px;
+      margin-bottom: 6px;
+      background: #f9f9f7;
+      border: 1px solid #e8e8e4;
+      font-size: 0.95rem;
+    }
+
+    .keyword-list li:last-child { margin-bottom: 0; }
+
+    .btn-remove {
+      background: none;
+      color: #aaa;
+      padding: 2px 6px;
+      font-size: 1.1rem;
+      line-height: 1;
+      border-radius: 4px;
+    }
+
+    .btn-remove:hover { background: #fee; color: #c0392b; }
+
+    .empty {
+      text-align: center;
+      color: #bbb;
+      font-size: 0.9rem;
+      padding: 16px 0;
+    }
+
+    .footer {
+      border-top: 1px solid #eee;
+      padding-top: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .count {
+      font-size: 0.85rem;
+      color: #888;
+    }
+
+    .btn-download {
+      background: #2c3e50;
+      color: #fff;
+      padding: 11px 22px;
+      font-size: 0.95rem;
+    }
+
+    .btn-download:hover { background: #1a252f; }
+    .btn-download:disabled { opacity: 0.4; cursor: default; }
+
+    .instructions {
+      margin-top: 24px;
+      background: #fafaf7;
+      border: 1px solid #e8e8e4;
+      border-radius: 8px;
+      padding: 18px 20px;
+      font-size: 0.85rem;
+      color: #555;
+      line-height: 1.6;
+      max-width: 520px;
+      width: 100%;
+    }
+
+    .instructions strong { color: #222; }
+
+    ol { padding-left: 18px; }
+    ol li { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>Supernote Keyworder</h1>
+    <p class="subtitle">Build your keyword list, then download the file for your device.</p>
+
+    <label for="kw-input">Add a keyword</label>
+    <div class="input-row">
+      <input type="text" id="kw-input" placeholder="e.g. TODO:" autocomplete="off" />
+      <button class="btn-add" onclick="addKeyword()">Add</button>
+    </div>
+
+    <ul class="keyword-list" id="kw-list">
+      <li class="empty" id="empty-msg">No keywords yet — add one above.</li>
+    </ul>
+
+    <div class="footer">
+      <span class="count" id="count">0 keywords</span>
+      <button class="btn-download" id="dl-btn" onclick="downloadJson()" disabled>
+        Download keywords.json
+      </button>
+    </div>
+  </div>
+
+  <div class="instructions">
+    <strong>How to install on your Supernote:</strong>
+    <ol>
+      <li>Add your keywords above, then click <strong>Download keywords.json</strong>.</li>
+      <li>Open the <strong>Supernote Partner</strong> app on your computer.</li>
+      <li>Navigate to <code>MyStyle / SnKeyworder /</code> on your device.</li>
+      <li>Copy <code>keywords.json</code> into that folder.</li>
+      <li>Open the Keyworder plugin on your Supernote — your keywords will load automatically.</li>
+    </ol>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'sn-keyworder-keywords';
+    const keywords = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+
+    const input = document.getElementById('kw-input');
+    const list  = document.getElementById('kw-list');
+    const empty = document.getElementById('empty-msg');
+    const count = document.getElementById('count');
+    const dlBtn = document.getElementById('dl-btn');
+
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') addKeyword(); });
+
+    function save() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(keywords));
+    }
+
+    function addKeyword() {
+      const val = input.value.trim();
+      if (!val) return;
+      if (keywords.includes(val)) {
+        input.select();
+        return;
+      }
+      keywords.push(val);
+      input.value = '';
+      save();
+      render();
+    }
+
+    function removeKeyword(idx) {
+      keywords.splice(idx, 1);
+      save();
+      render();
+    }
+
+    function render() {
+      Array.from(list.querySelectorAll('li:not(#empty-msg)')).forEach(el => el.remove());
+
+      if (keywords.length === 0) {
+        empty.style.display = '';
+        count.textContent = '0 keywords';
+        dlBtn.disabled = true;
+        return;
+      }
+
+      empty.style.display = 'none';
+      count.textContent = keywords.length + (keywords.length === 1 ? ' keyword' : ' keywords');
+      dlBtn.disabled = false;
+
+      keywords.forEach((kw, i) => {
+        const li = document.createElement('li');
+        const span = document.createElement('span');
+        span.textContent = kw;
+        const btn = document.createElement('button');
+        btn.className = 'btn-remove';
+        btn.textContent = '×';
+        btn.title = 'Remove';
+        btn.onclick = () => removeKeyword(i);
+        li.appendChild(span);
+        li.appendChild(btn);
+        list.appendChild(li);
+      });
+    }
+
+    function downloadJson() {
+      const json = JSON.stringify(keywords, null, 2);
+      const blob = new Blob([json], {type: 'application/json'});
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'keywords.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    render();
+  </script>
+</body>
+</html>
