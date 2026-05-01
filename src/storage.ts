@@ -1,6 +1,4 @@
-// In-memory storage — keywords persist for the session but reset when the
-// plugin is next opened. Persistent storage will be addressed in a follow-up
-// using Supernote's note-based file APIs (no AsyncStorage in PluginHost).
+import {PluginFileAPI, PluginNoteAPI, FileUtils} from 'sn-plugin-lib';
 
 export type Keyword = {
   id: string;
@@ -8,14 +6,131 @@ export type Keyword = {
   pinned: boolean;
 };
 
-let _store: Keyword[] = [];
+// Absolute Android path for sideloaded data
+const SIDELOAD_PATH = 'file:///storage/emulated/0/MyStyle/SnKeyworder/keywords.json';
+const STORAGE_DIR = '/MyStyle/SnKeyworder';
+const STORAGE_FILENAME = 'storage.note';
+const STORAGE_PREFIX = 'KW_DATA:';
+
+type ApiRes<T> = {
+  success: boolean;
+  result?: T;
+  error?: {message?: string};
+};
+
+async function getStoragePath(): Promise<string> {
+  try {
+    const exists = await FileUtils.exists(STORAGE_DIR);
+    if (!exists) {
+      await FileUtils.makeDir(STORAGE_DIR);
+    }
+  } catch (e) {
+    console.error('[Storage] Directory check failed', e);
+  }
+  return STORAGE_DIR + '/' + STORAGE_FILENAME;
+}
+
+async function ensureStorageNote(path: string): Promise<void> {
+  try {
+    const res = (await PluginFileAPI.getNoteTotalPageNum(path)) as ApiRes<number>;
+    if (res?.success && res.result && res.result > 0) {
+      return;
+    }
+
+    console.log('[Storage] Creating new storage note at:', path);
+    await PluginFileAPI.createNote({
+      notePath: path,
+      template: 'none',
+      mode: 0,
+      isPortrait: true,
+    });
+  } catch (e) {
+    console.error('[Storage] ensureStorageNote failed', e);
+  }
+}
 
 export async function loadKeywords(): Promise<Keyword[]> {
-  return [..._store];
+  // 1. Check storage note first — if it has data, use it and skip the JSON
+  try {
+    const path = await getStoragePath();
+    const res = (await PluginFileAPI.getElements(0, path)) as ApiRes<any[]>;
+    if (res?.success && res.result) {
+      const storageBox = res.result.find(
+        (el: any) =>
+          el.type === 500 &&
+          el.textBox?.textContentFull?.startsWith(STORAGE_PREFIX)
+      );
+      if (storageBox) {
+        const jsonStr = storageBox.textBox.textContentFull.slice(STORAGE_PREFIX.length);
+        console.log('[Storage] Loaded from storage note');
+        return JSON.parse(jsonStr);
+      }
+    }
+  } catch (e) {
+    console.error('[Storage] Load from note failed', e);
+  }
+
+  // 2. Storage note is empty — try one-time import from sideloaded JSON
+  try {
+    console.log('[Storage] Attempting one-time import from sideloaded JSON:', SIDELOAD_PATH);
+    const response = await fetch(SIDELOAD_PATH);
+    if (response.ok) {
+      const data = await response.json();
+      const keywords: Keyword[] = data.map((item: any) => {
+        if (typeof item === 'string') {
+          return {id: makeId(), label: item, pinned: false};
+        }
+        return item;
+      });
+      console.log('[Storage] Importing', keywords.length, 'keywords from JSON, saving to note');
+      await saveKeywords(keywords);
+      return keywords;
+    }
+  } catch (e) {
+    console.log('[Storage] Sideloaded JSON not found or invalid');
+  }
+
+  return [];
 }
 
 export async function saveKeywords(keywords: Keyword[]): Promise<void> {
-  _store = [...keywords];
+  try {
+    const path = await getStoragePath();
+    await ensureStorageNote(path);
+
+    console.log('[Storage] Saving keywords count:', keywords.length, 'to', path);
+    const dataStr = STORAGE_PREFIX + JSON.stringify(keywords);
+
+    await PluginFileAPI.clearLayerElements(path, 0, 0);
+    const insertRes = (await PluginFileAPI.insertElements(path, 0, [
+      {
+        type: 500, // TYPE_TEXT
+        layerNum: 0,
+        pageNum: 0,
+        textBox: {
+          textContentFull: dataStr,
+          textRect: {left: 0, top: 0, right: 200, bottom: 40},
+          fontSize: 10,
+          textBold: 0,
+          textItalics: 0,
+          textAlign: 0,
+          textEditable: 0,
+        },
+      },
+    ])) as ApiRes<boolean>;
+
+    if (!insertRes?.success) {
+      console.error('[Storage] insertElements failed:', insertRes?.error?.message);
+    }
+
+    try {
+      await PluginNoteAPI.saveCurrentNote();
+    } catch {
+      // ignore
+    }
+  } catch (e) {
+    console.error('[Storage] Save failed', e);
+  }
 }
 
 export function makeId(): string {
