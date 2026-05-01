@@ -213,15 +213,17 @@ export default function KeywordPanel({keywords, onManage}: Props) {
 
           {/* ── Header ── */}
           <View style={styles.header}>
-            <Text style={styles.title}>Tag Page</Text>
-            <Pressable
-              onPress={onManage}
-              style={({pressed}) => [
-                styles.manageBtn,
-                pressed && styles.btnPressed,
-              ]}>
-              <Text style={styles.manageBtnText}>Manage</Text>
-            </Pressable>
+            <Text style={styles.title}>Keyword Page</Text>
+            {false && (
+              <Pressable
+                onPress={onManage}
+                style={({pressed}) => [
+                  styles.manageBtn,
+                  pressed && styles.btnPressed,
+                ]}>
+                <Text style={styles.manageBtnText}>Manage</Text>
+              </Pressable>
+            )}
             <Pressable
               onPress={handleClose}
               style={({pressed}) => [
@@ -285,7 +287,7 @@ export default function KeywordPanel({keywords, onManage}: Props) {
           {sections.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>
-                {'No keywords yet.\nTap "+ Add" to create your first.'}
+                {'No keywords yet.\nUse the Keyword Builder web tool to create your keywords.json file.'}
               </Text>
             </View>
           ) : (
