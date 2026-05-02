@@ -35,6 +35,7 @@ type ApiRes<T> =
 type Props = {
   keywords: Keyword[];
   onManage: () => void;
+  onRefresh: () => void;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ type Props = {
 const DEFAULT_PAGE_WIDTH = 1404;
 const DEFAULT_PAGE_HEIGHT = 1872;
 const LABEL_FONT_SIZE = 40;
-const LABEL_BOX_HEIGHT = 60;
+const LABEL_BOX_HEIGHT = 80;
 const BOTTOM_MARGIN = 160;
 const LEFT_MARGIN = 180;
 
@@ -72,9 +73,9 @@ async function doInsertKeyword(label: string): Promise<void> {
   }
 
   const boxWidth = Math.max(
-    LABEL_FONT_SIZE * 4,
+    LABEL_FONT_SIZE * 6,
     Math.min(
-      Math.ceil(label.length * LABEL_FONT_SIZE * 0.55 * 1.15),
+      Math.ceil(label.length * LABEL_FONT_SIZE * 0.75 * 1.4),
       pageWidth - 200,
     ),
   );
@@ -115,7 +116,7 @@ async function doInsertKeyword(label: string): Promise<void> {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export default function KeywordPanel({keywords, onManage}: Props) {
+export default function KeywordPanel({keywords, onManage, onRefresh}: Props) {
   const [inserting, setInserting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -225,6 +226,14 @@ export default function KeywordPanel({keywords, onManage}: Props) {
               </Pressable>
             )}
             <Pressable
+              onPress={onRefresh}
+              style={({pressed}) => [
+                styles.manageBtn,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.manageBtnText}>Refresh</Text>
+            </Pressable>
+            <Pressable
               onPress={handleClose}
               style={({pressed}) => [
                 styles.closeBtn,
@@ -289,6 +298,11 @@ export default function KeywordPanel({keywords, onManage}: Props) {
               <Text style={styles.emptyText}>
                 {'No keywords yet.\nUse the Keyword Builder web tool to create your keywords.json file.'}
               </Text>
+              <Pressable
+                onPress={onRefresh}
+                style={({pressed}) => [styles.refreshBtn, pressed && styles.btnPressed]}>
+                <Text style={styles.refreshBtnText}>Load Keywords</Text>
+              </Pressable>
             </View>
           ) : (
             <ScrollView
@@ -296,12 +310,12 @@ export default function KeywordPanel({keywords, onManage}: Props) {
               style={styles.listScroll}
               showsVerticalScrollIndicator={false}>
               {sections.map(({letter, items}) => (
-                <View key={letter}>
-                  <View
-                    style={styles.listSectionHeader}
-                    onLayout={e => {
-                      sectionYRef.current[letter] = e.nativeEvent.layout.y;
-                    }}>
+                <View
+                  key={letter}
+                  onLayout={e => {
+                    sectionYRef.current[letter] = e.nativeEvent.layout.y;
+                  }}>
+                  <View style={styles.listSectionHeader}>
                     <Text style={styles.listSectionHeaderText}>{letter}</Text>
                   </View>
                   {items.map((kw, idx) => (
@@ -504,11 +518,24 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
     paddingHorizontal: PANEL_PADDING,
     alignItems: 'center',
+    gap: 20,
   },
   emptyText: {
     fontSize: 16,
     color: '#888888',
     textAlign: 'center',
     lineHeight: 26,
+  },
+  refreshBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+  },
+  refreshBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
   },
 });

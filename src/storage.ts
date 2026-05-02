@@ -6,7 +6,6 @@ export type Keyword = {
   pinned: boolean;
 };
 
-// Absolute Android path for sideloaded data
 const SIDELOAD_PATH = 'file:///storage/emulated/0/MyStyle/SnKeyworder/keywords.json';
 const STORAGE_DIR = '/MyStyle/SnKeyworder';
 const STORAGE_FILENAME = 'storage.note';
@@ -36,8 +35,6 @@ async function ensureStorageNote(path: string): Promise<void> {
     if (res?.success && res.result && res.result > 0) {
       return;
     }
-
-    console.log('[Storage] Creating new storage note at:', path);
     await PluginFileAPI.createNote({
       notePath: path,
       template: 'none',
@@ -50,47 +47,25 @@ async function ensureStorageNote(path: string): Promise<void> {
 }
 
 export async function loadKeywords(): Promise<Keyword[]> {
-  // 1. Check storage note first — if it has data, use it and skip the JSON
   try {
-    const path = await getStoragePath();
-    const res = (await PluginFileAPI.getElements(0, path)) as ApiRes<any[]>;
-    if (res?.success && res.result) {
-      const storageBox = res.result.find(
-        (el: any) =>
-          el.type === 500 &&
-          el.textBox?.textContentFull?.startsWith(STORAGE_PREFIX)
-      );
-      if (storageBox) {
-        const jsonStr = storageBox.textBox.textContentFull.slice(STORAGE_PREFIX.length);
-        console.log('[Storage] Loaded from storage note');
-        return JSON.parse(jsonStr);
-      }
-    }
-  } catch (e) {
-    console.error('[Storage] Load from note failed', e);
-  }
-
-  // 2. Storage note is empty — try one-time import from sideloaded JSON
-  try {
-    console.log('[Storage] Attempting one-time import from sideloaded JSON:', SIDELOAD_PATH);
     const response = await fetch(SIDELOAD_PATH);
-    if (response.ok) {
-      const data = await response.json();
-      const keywords: Keyword[] = data.map((item: any) => {
-        if (typeof item === 'string') {
-          return {id: makeId(), label: item, pinned: false};
-        }
-        return item;
-      });
-      console.log('[Storage] Importing', keywords.length, 'keywords from JSON, saving to note');
-      await saveKeywords(keywords);
-      return keywords;
+    // file:// URLs on Android return status 0, not 200 — parse regardless
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
     }
+    const keywords: Keyword[] = data.map((item: any) => {
+      if (typeof item === 'string') {
+        return {id: makeId(), label: item, pinned: false};
+      }
+      return item;
+    });
+    console.log('[Storage] Loaded', keywords.length, 'keywords');
+    return keywords;
   } catch (e) {
-    console.log('[Storage] Sideloaded JSON not found or invalid');
+    console.log('[Storage] Load failed:', e);
+    return [];
   }
-
-  return [];
 }
 
 export async function saveKeywords(keywords: Keyword[]): Promise<void> {
@@ -98,13 +73,11 @@ export async function saveKeywords(keywords: Keyword[]): Promise<void> {
     const path = await getStoragePath();
     await ensureStorageNote(path);
 
-    console.log('[Storage] Saving keywords count:', keywords.length, 'to', path);
     const dataStr = STORAGE_PREFIX + JSON.stringify(keywords);
-
     await PluginFileAPI.clearLayerElements(path, 0, 0);
     const insertRes = (await PluginFileAPI.insertElements(path, 0, [
       {
-        type: 500, // TYPE_TEXT
+        type: 500,
         layerNum: 0,
         pageNum: 0,
         textBox: {

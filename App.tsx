@@ -3,6 +3,7 @@ import {installPluginRouter} from './src/pluginRouter';
 import KeywordPanel from './src/KeywordPanel';
 import ConfigPanel from './src/ConfigPanel';
 import {Keyword, loadKeywords, saveKeywords} from './src/storage';
+import {PluginManager} from 'sn-plugin-lib';
 
 installPluginRouter();
 
@@ -10,9 +11,20 @@ export default function App() {
   const [view, setView] = useState<'main' | 'config'>('main');
   const [keywords, setKeywords] = useState<Keyword[]>([]);
   useEffect(() => {
-    loadKeywords()
-      .then(setKeywords)
-      .catch(() => {}); // non-fatal — start with empty list
+    const reload = () =>
+      loadKeywords()
+        .then(kws => { if (kws.length > 0) setKeywords(kws); })
+        .catch(() => {});
+
+    reload();
+
+
+    const sub = PluginManager.addPluginLifeListener({
+      onStart: reload,
+      onStop() {},
+    });
+
+    return () => sub.remove();
   }, []);
 
   const updateKeywords = useCallback(async (kws: Keyword[]) => {
@@ -35,6 +47,7 @@ export default function App() {
       keywords={keywords}
       onUpdate={updateKeywords}
       onManage={() => setView('config')}
+      onRefresh={() => loadKeywords().then(kws => { if (kws.length > 0) setKeywords(kws); }).catch(() => {})}
     />
   );
 }

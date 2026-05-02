@@ -89,13 +89,24 @@
       min-height: 40px;
     }
 
+    .alpha-header {
+      background: #f0f0f0;
+      padding: 4px 12px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #555;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+      border-radius: 4px;
+    }
+
     .keyword-list li {
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding: 9px 12px;
       border-radius: 7px;
-      margin-bottom: 6px;
+      margin-bottom: 2px;
       background: #f9f9f7;
       border: 1px solid #e8e8e4;
       font-size: 0.95rem;
@@ -146,6 +157,23 @@
     .btn-download:hover { background: #1a252f; }
     .btn-download:disabled { opacity: 0.4; cursor: default; }
 
+    .btn-load {
+      background: #f0f0ee;
+      color: #444;
+      border: 1px solid #ccc;
+      padding: 10px 18px;
+      font-size: 0.95rem;
+      white-space: nowrap;
+    }
+
+    .btn-load:hover { background: #e4e4e0; }
+
+    .load-status {
+      font-size: 0.85rem;
+      color: #888;
+      align-self: center;
+    }
+
     .instructions {
       margin-top: 24px;
       background: #fafaf7;
@@ -175,6 +203,12 @@
     <div class="input-row">
       <input type="text" id="kw-input" placeholder="e.g. TODO:" autocomplete="off" />
       <button class="btn-add" onclick="addKeyword()">Add</button>
+    </div>
+
+    <div class="input-row" style="margin-bottom: 24px;">
+      <input type="file" id="file-input" accept=".json" style="display:none" onchange="loadFromFile(event)" />
+      <button class="btn-load" onclick="document.getElementById('file-input').click()">Load from file</button>
+      <span class="load-status" id="load-status"></span>
     </div>
 
     <ul class="keyword-list" id="kw-list">
@@ -229,14 +263,15 @@
       render();
     }
 
-    function removeKeyword(idx) {
-      keywords.splice(idx, 1);
+    function removeKeyword(kw) {
+      const idx = keywords.indexOf(kw);
+      if (idx !== -1) keywords.splice(idx, 1);
       save();
       render();
     }
 
     function render() {
-      Array.from(list.querySelectorAll('li:not(#empty-msg)')).forEach(el => el.remove());
+      Array.from(list.querySelectorAll('li:not(#empty-msg), .alpha-header')).forEach(el => el.remove());
 
       if (keywords.length === 0) {
         empty.style.display = '';
@@ -249,19 +284,64 @@
       count.textContent = keywords.length + (keywords.length === 1 ? ' keyword' : ' keywords');
       dlBtn.disabled = false;
 
-      keywords.forEach((kw, i) => {
-        const li = document.createElement('li');
-        const span = document.createElement('span');
-        span.textContent = kw;
-        const btn = document.createElement('button');
-        btn.className = 'btn-remove';
-        btn.textContent = '×';
-        btn.title = 'Remove';
-        btn.onclick = () => removeKeyword(i);
-        li.appendChild(span);
-        li.appendChild(btn);
-        list.appendChild(li);
-      });
+      const sorted = [...keywords].sort((a, b) => a.localeCompare(b));
+      const groups = new Map();
+      for (const kw of sorted) {
+        const letter = (kw[0] ?? '#').toUpperCase();
+        if (!groups.has(letter)) groups.set(letter, []);
+        groups.get(letter).push(kw);
+      }
+
+      for (const [letter, group] of groups) {
+        const header = document.createElement('div');
+        header.className = 'alpha-header';
+        header.textContent = letter;
+        list.appendChild(header);
+
+        for (const kw of group) {
+          const li = document.createElement('li');
+          const span = document.createElement('span');
+          span.textContent = kw;
+          const btn = document.createElement('button');
+          btn.className = 'btn-remove';
+          btn.textContent = '×';
+          btn.title = 'Remove';
+          btn.onclick = () => removeKeyword(kw);
+          li.appendChild(span);
+          li.appendChild(btn);
+          list.appendChild(li);
+        }
+      }
+    }
+
+    function loadFromFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const data = JSON.parse(e.target.result);
+          if (!Array.isArray(data)) throw new Error();
+          let added = 0;
+          for (const item of data) {
+            const label = typeof item === 'string' ? item : item.label;
+            if (label && !keywords.includes(label)) {
+              keywords.push(label);
+              added++;
+            }
+          }
+          save();
+          render();
+          const status = document.getElementById('load-status');
+          status.textContent = added > 0 ? `${added} keyword${added === 1 ? '' : 's'} added` : 'No new keywords';
+          setTimeout(() => status.textContent = '', 3000);
+        } catch {
+          document.getElementById('load-status').textContent = 'Invalid file';
+          setTimeout(() => document.getElementById('load-status').textContent = '', 3000);
+        }
+        event.target.value = '';
+      };
+      reader.readAsText(file);
     }
 
     function downloadJson() {
