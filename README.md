@@ -28,7 +28,7 @@ Keyworder uses a `keywords.json` file stored on your device to populate the keyw
 2. Go to the Keyword Builder, add your keywords, and click **Download keywords.json**.
 3. Connect your Supernote via the Partner app or Browse & Access.
 4. Copy `keywords.json` into `MyStyle/SnKeyworder/` on your device.
-5. Close and reopen the plugin — your keywords will load automatically.
+5. Open the plugin and tap **Load Keywords** — your keyword list will populate.
 
 To update your keywords later, return to the Keyword Builder (your list will still be there), make your changes, download the updated file, copy it back to the same folder, then tap **Refresh** in the plugin to load the changes.
 
