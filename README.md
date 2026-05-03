@@ -38,7 +38,7 @@ Keyworder uses a `keywords.json` file stored on your device to populate the keyw
 4. Copy `keywords.json` into `MyStyle/SnKeyworder/` on your device.
 5. Open the plugin and tap **Load Keywords** — your keyword list will populate.
 
-To update your keywords later, return to the Keyword Builder (your list will still be there), make your changes, download the updated file, copy it back to the same folder, then tap **Refresh** in the plugin to load the changes.
+To update your keywords later, return to the Keyword Builder (your list will still be there), make your changes, download the updated file, copy it back to the same folder, **Make sure you have deleted the old file first!**, then tap **Refresh** in the plugin to load the changes.
 
 ## Usage
 
