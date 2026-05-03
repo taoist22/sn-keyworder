@@ -1,3 +1,11 @@
+
+
+https://github.com/user-attachments/assets/f34df9e4-7201-4b98-add2-7ec3ba60ab7e
+
+
+
+https://github.com/user-attachments/assets/e0c9dfe5-80fb-4943-8f01-95a33f713459
+
 # Keyworder for Supernote
 
 **Keyworder** is a productivity plugin for the Supernote Nomad that lets you stamp your most-used keywords onto a note page with a single tap, and automatically adds them to the device's native keyword navigation index.
