@@ -13,7 +13,7 @@ export default function App() {
   useEffect(() => {
     const reload = () =>
       loadKeywords()
-        .then(kws => { if (kws.length > 0) setKeywords(kws); })
+        .then(kws => setKeywords(kws))
         .catch(() => {});
 
     reload();
@@ -47,7 +47,7 @@ export default function App() {
       keywords={keywords}
       onUpdate={updateKeywords}
       onManage={() => setView('config')}
-      onRefresh={() => loadKeywords().then(kws => { if (kws.length > 0) setKeywords(kws); }).catch(() => {})}
+      onRefresh={() => loadKeywords().then(kws => setKeywords(kws)).catch(() => {})}
     />
   );
 }
