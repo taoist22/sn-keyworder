@@ -43,7 +43,7 @@ type Props = {
 const DEFAULT_PAGE_WIDTH = 1404;
 const DEFAULT_PAGE_HEIGHT = 1872;
 const LABEL_FONT_SIZE = 40;
-const LABEL_BOX_HEIGHT = 80;
+const LABEL_BOX_HEIGHT = 50;
 const BOTTOM_MARGIN = 160;
 const LEFT_MARGIN = 180;
 
