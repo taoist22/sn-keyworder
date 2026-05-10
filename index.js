@@ -13,7 +13,7 @@ AppRegistry.registerComponent(appName, () => App);
 PluginManager.init();
 installPluginRouter();
 
-PluginManager.registerButton(BUTTON_TYPE_TOOLBAR, ['NOTE'], {
+PluginManager.registerButton(BUTTON_TYPE_TOOLBAR, ['NOTE', 'DOC'], {
   id: TOOLBAR_BUTTON_ID,
   name: 'Keyworder',
   icon: Image.resolveAssetSource(require('./assets/tag.png')).uri,

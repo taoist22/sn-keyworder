@@ -72,39 +72,42 @@ async function doInsertKeyword(label: string): Promise<void> {
     // fall through to defaults
   }
 
-  const boxWidth = Math.max(
-    LABEL_FONT_SIZE * 6,
-    Math.min(
-      Math.ceil(label.length * LABEL_FONT_SIZE * 0.75 * 1.4),
-      pageWidth - 200,
-    ),
-  );
-  const bottom = Math.round(pageHeight - BOTTOM_MARGIN);
-  const top = bottom - LABEL_BOX_HEIGHT;
-  const textRect = {left: LEFT_MARGIN, top, right: LEFT_MARGIN + boxWidth, bottom};
+  const isNote = filePath?.toLowerCase().endsWith('.note') ?? true;
 
-  const res = (await PluginNoteAPI.insertText({
-    textContentFull: label,
-    textRect,
-    fontSize: LABEL_FONT_SIZE,
-    textBold: 1,
-    textItalics: 0,
-    textAlign: 0,
-    textEditable: 1,
-    showLassoAfterInsert: true,
-  })) as ApiRes<boolean>;
+  if (isNote) {
+    const boxWidth = Math.max(
+      LABEL_FONT_SIZE * 6,
+      Math.min(
+        Math.ceil(label.length * LABEL_FONT_SIZE * 0.75 * 1.4),
+        pageWidth - 200,
+      ),
+    );
+    const bottom = Math.round(pageHeight - BOTTOM_MARGIN);
+    const top = bottom - LABEL_BOX_HEIGHT;
+    const textRect = {left: LEFT_MARGIN, top, right: LEFT_MARGIN + boxWidth, bottom};
 
-  if (!res?.success) {
-    throw new Error(res?.error?.message ?? 'insertText failed');
+    const res = (await PluginNoteAPI.insertText({
+      textContentFull: label,
+      textRect,
+      fontSize: LABEL_FONT_SIZE,
+      textBold: 1,
+      textItalics: 0,
+      textAlign: 0,
+      textEditable: 1,
+      showLassoAfterInsert: true,
+    })) as ApiRes<boolean>;
+
+    if (!res?.success) {
+      throw new Error(res?.error?.message ?? 'insertText failed');
+    }
   }
 
-  // Best-effort: also add to native keyword index for page navigation
-  try {
-    if (filePath !== undefined && pageNum !== undefined) {
-      await PluginFileAPI.insertKeyWord(filePath, pageNum, label);
+  // Add to native keyword index for page navigation
+  if (filePath !== undefined && pageNum !== undefined) {
+    const kwRes = (await PluginFileAPI.insertKeyWord(filePath, pageNum, label)) as ApiRes<boolean>;
+    if (!isNote && !kwRes?.success) {
+      throw new Error(kwRes?.error?.message ?? 'Keyword indexing not supported for this file type');
     }
-  } catch {
-    // non-fatal — duplicate and other errors are acceptable
   }
 }
 

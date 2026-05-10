@@ -1,6 +1,6 @@
 {
   "name": "Keyworder",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Tag the current Supernote page with a keyword from your personal list — one tap, zero lasso.",
   "private": true,
   "scripts": {
