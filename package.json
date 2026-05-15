@@ -1,6 +1,6 @@
 {
   "name": "Keyworder",
-  "version": "1.0.2",
+  "version": "1.1.0-beta",
   "description": "Tag the current Supernote page with a keyword from your personal list — one tap, zero lasso.",
   "private": true,
   "scripts": {
@@ -11,9 +11,10 @@
     "test": "jest"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "^1.23.1",
     "react": "19.0.0",
     "react-native": "0.79.2",
-    "sn-plugin-lib": "^0.1.19"
+    "sn-plugin-lib": "^0.1.43"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
