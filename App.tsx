@@ -45,9 +45,7 @@ export default function App() {
   return (
     <KeywordPanel
       keywords={keywords}
-      onUpdate={updateKeywords}
       onManage={() => setView('config')}
-      onRefresh={() => loadKeywords().then(kws => setKeywords(kws)).catch(() => {})}
     />
   );
 }

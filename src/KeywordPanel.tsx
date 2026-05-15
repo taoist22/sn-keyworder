@@ -35,7 +35,6 @@ type ApiRes<T> =
 type Props = {
   keywords: Keyword[];
   onManage: () => void;
-  onRefresh: () => void;
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -94,12 +93,14 @@ async function doInsertKeyword(label: string): Promise<void> {
       textItalics: 0,
       textAlign: 0,
       textEditable: 1,
-      showLassoAfterInsert: true,
+      showLassoAfterInsert: false,
     })) as ApiRes<boolean>;
 
     if (!res?.success) {
       throw new Error(res?.error?.message ?? 'insertText failed');
     }
+
+    await PluginCommAPI.lassoElements(textRect);
   }
 
   // Add to native keyword index for page navigation
@@ -113,7 +114,7 @@ async function doInsertKeyword(label: string): Promise<void> {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export default function KeywordPanel({keywords, onManage, onRefresh}: Props) {
+export default function KeywordPanel({keywords, onManage}: Props) {
   const [inserting, setInserting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -212,23 +213,13 @@ export default function KeywordPanel({keywords, onManage, onRefresh}: Props) {
           {/* ── Header ── */}
           <View style={styles.header}>
             <Text style={styles.title}>Keyword Page</Text>
-            {false && (
-              <Pressable
-                onPress={onManage}
-                style={({pressed}) => [
-                  styles.manageBtn,
-                  pressed && styles.btnPressed,
-                ]}>
-                <Text style={styles.manageBtnText}>Manage</Text>
-              </Pressable>
-            )}
             <Pressable
-              onPress={onRefresh}
+              onPress={onManage}
               style={({pressed}) => [
                 styles.manageBtn,
                 pressed && styles.btnPressed,
               ]}>
-              <Text style={styles.manageBtnText}>Refresh</Text>
+              <Text style={styles.manageBtnText}>Manage</Text>
             </Pressable>
             <Pressable
               onPress={handleClose}
@@ -293,13 +284,8 @@ export default function KeywordPanel({keywords, onManage, onRefresh}: Props) {
           {sections.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>
-                {'No keywords yet.\nUse the Keyword Builder web tool to create your keywords.json file.'}
+                {'No keywords yet.\nTap Manage to add your first keyword.'}
               </Text>
-              <Pressable
-                onPress={onRefresh}
-                style={({pressed}) => [styles.refreshBtn, pressed && styles.btnPressed]}>
-                <Text style={styles.refreshBtnText}>Load Keywords</Text>
-              </Pressable>
             </View>
           ) : (
             <ScrollView
