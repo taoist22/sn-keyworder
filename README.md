@@ -16,6 +16,7 @@ https://github.com/user-attachments/assets/e0c9dfe5-80fb-4943-8f01-95a33f713459
 
 - **One-tap tagging** — insert a keyword onto the current page instantly, no lasso or handwriting recognition needed
 - **Native index integration** — automatically adds each keyword to the device's built-in keyword index for page navigation
+- **In-plugin keyword management** — add, delete, and pin keywords directly from the plugin; changes persist automatically
 - **Pinned keywords** — keep your most-used keywords at the top of the list for zero-scroll access
 - **A-Z jump row** — quickly navigate large keyword lists with alphabetical shortcuts
 
@@ -26,26 +27,29 @@ https://github.com/user-attachments/assets/e0c9dfe5-80fb-4943-8f01-95a33f713459
 3. Copy `Keyworder.snplg` into the `MyStyle` folder on your device.
 4. On your Supernote, open a note, tap the **plugin icon** in the toolbar, go to **Manage Plugins**, tap **Add Plugin**, and select `Keyworder`.
 
-## Setting Up Your Keywords
+## Managing Your Keywords
 
-Keyworder uses a `keywords.json` file stored on your device to populate the keyword list. Use the **Keyword Builder** web tool to create and manage this file:
+Keywords are managed entirely within the plugin — no external tools or file transfers needed.
 
-**[Open the Keyword Builder](https://taoist22.github.io/sn-keyworder/keyword-tool.html)**
+### Adding a keyword
 
-1. **Launch the plugin first** — open a note, tap the plugin icon, and open Keyworder. This creates the `MyStyle/SnKeyworder/` folder on your device automatically.
-2. Go to the Keyword Builder, add your keywords, and click **Download keywords.json**.
-3. Connect your Supernote via the Partner app or Browse & Access.
-4. Copy `keywords.json` into `MyStyle/SnKeyworder/` on your device.
-5. Open the plugin and tap **Load Keywords** — your keyword list will populate.
+1. Open Keyworder and tap **Manage** in the header.
+2. Tap **+ Add**, type your keyword, and confirm.
+3. The keyword is saved immediately and will be there the next time you open the plugin.
 
-To update your keywords later, return to the Keyword Builder (your list will still be there), make your changes, download the updated file, copy it back to the same folder, **Make sure you have deleted the old file first!**, then tap **Refresh** in the plugin to load the changes.
+### Pinning a keyword
+
+In the Manage screen, tap the **pin icon** next to any keyword to move it to the Pinned section at the top of the list for quick access.
+
+### Deleting a keyword
+
+In the Manage screen, tap the **delete icon** next to the keyword you want to remove.
 
 ## Usage
 
 1. Open a note and tap the **plugin icon** in the toolbar.
 2. Select a keyword from the list.
-3. The plugin stamps the keyword at the bottom of the page — move it to your desired location. It is also added to the native keyword navigation index.
-4. Tap **Refresh** in the header at any time to reload your keyword list after uploading an updated `keywords.json`.
+3. The plugin stamps the keyword at the bottom of the page — it will be selected so you can immediately move it to your desired location. It is also added to the native keyword navigation index.
 
 ## Building from Source
 
@@ -53,15 +57,18 @@ To update your keywords later, return to the Keyword Builder (your list will sti
 
 - [Node.js](https://nodejs.org/) (v18+)
 - npm
+- JDK 19+ (for native Android build)
 
 ### Build
 
 ```bash
 npm install
-./buildPlugin.sh
+JAVA_HOME=/path/to/your/jdk ./buildPlugin.sh
 ```
 
 The plugin file will be generated at `build/outputs/Keyworder.snplg`.
+
+> **Note:** The first build generates autolinking files; run the build command twice on a clean checkout to ensure `reactPackages` is correctly populated in the plugin config.
 
 ## License
 
