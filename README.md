@@ -1,10 +1,9 @@
 
 
-https://github.com/user-attachments/assets/f34df9e4-7201-4b98-add2-7ec3ba60ab7e
+
+https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 
 
-
-https://github.com/user-attachments/assets/e0c9dfe5-80fb-4943-8f01-95a33f713459
 
 # Keyworder for Supernote
 
