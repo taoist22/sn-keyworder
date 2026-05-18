@@ -1,4 +1,4 @@
-import React, {useCallback, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   FlatList,
   Pressable,
@@ -8,6 +8,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import {FileUtils} from 'sn-plugin-lib';
 import {Keyword, makeId} from './storage';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -15,6 +16,10 @@ import {Keyword, makeId} from './storage';
 const PANEL_WIDTH = 480;
 const PANEL_PADDING = 20;
 const ITEM_HEIGHT = 64;
+
+const IMPORT_DIR = '/storage/emulated/0/MyStyle/SnKeyworder';
+const IMPORT_URL = 'file:///storage/emulated/0/MyStyle/SnKeyworder/keywords.json';
+const IMPORT_MSG_MS = 4000;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -31,6 +36,15 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
   const [newLabel, setNewLabel] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const importMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (importMsgTimerRef.current) clearTimeout(importMsgTimerRef.current);
+    };
+  }, []);
 
   // Pinned first (in insertion order), then unpinned alphabetically
   const sorted = useMemo(() => {
@@ -84,6 +98,45 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
     setAddError(null);
   }, []);
 
+  const handleImport = useCallback(async () => {
+    if (importing) return;
+    setImporting(true);
+    setImportMsg(null);
+    if (importMsgTimerRef.current) clearTimeout(importMsgTimerRef.current);
+    const scheduleHide = (msg: string) => {
+      setImportMsg(msg);
+      importMsgTimerRef.current = setTimeout(() => setImportMsg(null), IMPORT_MSG_MS);
+    };
+    try {
+      try { await (FileUtils as any).makeDir(IMPORT_DIR); } catch {}
+      const response = await fetch(IMPORT_URL);
+      if (!response.ok) throw new Error('not_found');
+      const data = await response.json();
+      if (!Array.isArray(data)) throw new Error('invalid');
+      const labels: string[] = (data as any[])
+        .map(item => (typeof item === 'string' ? item.trim() : item?.label?.trim()))
+        .filter(Boolean);
+      const existingLower = new Set(keywords.map(k => k.label.toLowerCase()));
+      const toAdd: Keyword[] = labels
+        .filter(label => !existingLower.has(label.toLowerCase()))
+        .map(label => ({id: makeId(), label, pinned: false}));
+      if (toAdd.length === 0) {
+        scheduleHide('No new keywords — all already in list');
+      } else {
+        await onUpdate([...keywords, ...toAdd]);
+        scheduleHide(`Imported ${toAdd.length} keyword${toAdd.length !== 1 ? 's' : ''}`);
+      }
+    } catch (e: any) {
+      if (e?.message === 'invalid') {
+        scheduleHide('Invalid format — use ["keyword1", "keyword2"]');
+      } else {
+        scheduleHide('keywords.json not found — place it at MyStyle/SnKeyworder/');
+      }
+    } finally {
+      setImporting(false);
+    }
+  }, [importing, keywords, onUpdate]);
+
   const handleDelete = useCallback(
     async (id: string) => {
       const updated = keywords.filter(k => k.id !== id);
@@ -129,15 +182,26 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
       </View>
       <View style={styles.divider} />
 
-      {/* ── Legend + Add button ── */}
+      {/* ── Legend + Add + Import buttons ── */}
       <View style={styles.legendRow}>
         <Text style={styles.legendText}>{'★ pin   ✕ delete'}</Text>
+        <Pressable
+          onPress={handleImport}
+          disabled={importing}
+          style={({pressed}) => [styles.importBtn, pressed && styles.btnPressed, importing && styles.btnDisabled]}>
+          <Text style={styles.importBtnText}>{importing ? '…' : 'Import'}</Text>
+        </Pressable>
         <Pressable
           onPress={handleStartAdd}
           style={({pressed}) => [styles.addBtn, pressed && styles.btnPressed]}>
           <Text style={styles.addBtnText}>{'+ Add'}</Text>
         </Pressable>
       </View>
+      {importMsg != null && (
+        <View style={styles.importMsgBanner}>
+          <Text style={styles.importMsgText}>{importMsg}</Text>
+        </View>
+      )}
       <View style={styles.lightDivider} />
 
       {/* ── Add input ── */}
@@ -311,6 +375,35 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     color: '#888888',
+  },
+  importBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#555555',
+    marginRight: 8,
+  },
+  importBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#555555',
+  },
+  btnDisabled: {
+    opacity: 0.4,
+  },
+  importMsgBanner: {
+    marginHorizontal: PANEL_PADDING,
+    marginTop: 4,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  importMsgText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    textAlign: 'center',
   },
   addBtn: {
     paddingHorizontal: 12,
