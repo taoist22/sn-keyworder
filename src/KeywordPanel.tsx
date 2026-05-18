@@ -100,7 +100,6 @@ async function doInsertKeyword(label: string): Promise<void> {
       throw new Error(res?.error?.message ?? 'insertText failed');
     }
 
-    await PluginCommAPI.lassoElements(textRect);
   }
 
   // Add to native keyword index for page navigation
