@@ -49,7 +49,7 @@ In the Manage screen, tap the **delete icon** next to the keyword you want to re
 
 You can import a large list of keywords at once by dropping a JSON file onto your device:
 
-1. Create a file named `keywords.json` containing a JSON array of strings:
+1. Build your keyword list using the **[Keyword Builder web tool](https://taoist22.github.io/sn-keyworder/keyword-tool.html)** and download the generated `keywords.json`, or create one manually:
    ```json
    ["TODO:", "REVIEW:", "URGENT", "SOC297", "ENG102"]
    ```
