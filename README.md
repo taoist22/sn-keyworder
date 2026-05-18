@@ -16,6 +16,7 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 - **One-tap tagging** — insert a keyword onto the current page instantly, no lasso or handwriting recognition needed
 - **Native index integration** — automatically adds each keyword to the device's built-in keyword index for page navigation
 - **In-plugin keyword management** — add, delete, and pin keywords directly from the plugin; changes persist automatically
+- **Bulk import** — load a list of keywords at once from a JSON file you drop onto the device
 - **Pinned keywords** — keep your most-used keywords at the top of the list for zero-scroll access
 - **A-Z jump row** — quickly navigate large keyword lists with alphabetical shortcuts
 
@@ -43,6 +44,22 @@ In the Manage screen, tap the **pin icon** next to any keyword to move it to the
 ### Deleting a keyword
 
 In the Manage screen, tap the **delete icon** next to the keyword you want to remove.
+
+### Bulk importing keywords
+
+You can import a large list of keywords at once by dropping a JSON file onto your device:
+
+1. Create a file named `keywords.json` containing a JSON array of strings:
+   ```json
+   ["TODO:", "REVIEW:", "URGENT", "SOC297", "ENG102"]
+   ```
+2. Connect your Supernote via Browse & Access and copy `keywords.json` to:
+   ```
+   MyStyle/SnKeyworder/keywords.json
+   ```
+   The `SnKeyworder` folder is created automatically the first time you tap Import.
+3. Open Keyworder, tap **Manage**, then tap **Import**.
+4. New keywords are merged in — any that already exist in your list are skipped.
 
 ## Usage
 
