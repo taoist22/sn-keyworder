@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 
 ## Features
 
-- **One-tap tagging** — insert a keyword onto the current page instantly, no lasso or handwriting recognition needed
+- **Multi-keyword insertion** — check up to 4 keywords at once and insert them all in one tap; each keyword lands as a separate, movable element in a horizontal row at the bottom of the page
 - **Native index integration** — automatically adds each keyword to the device's built-in keyword index for page navigation
 - **In-plugin keyword management** — add, delete, and pin keywords directly from the plugin; changes persist automatically
 - **Bulk import** — load a list of keywords at once from a JSON file you drop onto the device
@@ -64,8 +64,8 @@ You can import a large list of keywords at once by dropping a JSON file onto you
 ## Usage
 
 1. Open a note and tap the **plugin icon** in the toolbar.
-2. Select a keyword from the list.
-3. The plugin stamps the keyword at the bottom of the page — it will be selected so you can immediately move it to your desired location. It is also added to the native keyword navigation index.
+2. Tap one or more keywords to check them (up to 4 at a time). A checkmark appears next to each selected keyword and the count updates in the Insert bar at the bottom.
+3. Tap **Insert**. Each keyword is stamped onto the page as a separate element in a horizontal row at the bottom — use lasso to move individual keywords to your desired locations. All inserted keywords are also added to the native keyword navigation index.
 
 ## Building from Source
 

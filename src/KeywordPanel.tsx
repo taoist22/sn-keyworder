@@ -24,6 +24,7 @@ const PANEL_PADDING = 20;
 const ITEM_HEIGHT = 60;
 const SECTION_HEADER_HEIGHT = 28;
 const ERROR_DISPLAY_MS = 2500;
+const MAX_SELECT = 4;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ const LABEL_BOX_HEIGHT = 50;
 const BOTTOM_MARGIN = 160;
 const LEFT_MARGIN = 180;
 
-async function doInsertKeyword(label: string): Promise<void> {
+async function doInsertKeywords(labels: string[]): Promise<void> {
   let pageWidth = DEFAULT_PAGE_WIDTH;
   let pageHeight = DEFAULT_PAGE_HEIGHT;
   let filePath: string | undefined;
@@ -73,41 +74,55 @@ async function doInsertKeyword(label: string): Promise<void> {
 
   const isNote = filePath?.toLowerCase().endsWith('.note') ?? true;
 
-  if (isNote) {
-    const boxWidth = Math.max(
-      LABEL_FONT_SIZE * 6,
-      Math.min(
-        Math.ceil(label.length * LABEL_FONT_SIZE * 0.75 * 1.4),
-        pageWidth - 200,
-      ),
-    );
-    const bottom = Math.round(pageHeight - BOTTOM_MARGIN);
-    const top = bottom - LABEL_BOX_HEIGHT;
-    const textRect = {left: LEFT_MARGIN, top, right: LEFT_MARGIN + boxWidth, bottom};
+  // Lay keywords out horizontally at the bottom with a gap between each box.
+  // Natural widths are scaled down proportionally if the total exceeds available space.
+  const H_GAP = 40;
+  const count = labels.length;
+  const available = pageWidth - LEFT_MARGIN - 20 - H_GAP * (count - 1);
+  const naturalWidths = labels.map(label =>
+    Math.max(
+      LABEL_FONT_SIZE * 4,
+      Math.ceil(label.length * LABEL_FONT_SIZE * 0.80 * 1.15),
+    ),
+  );
+  const totalNatural = naturalWidths.reduce((a, b) => a + b, 0);
+  const scale = totalNatural > available ? available / totalNatural : 1;
+  const boxWidths = naturalWidths.map(w => Math.floor(w * scale));
 
-    const res = (await PluginNoteAPI.insertText({
-      textContentFull: label,
-      textRect,
-      fontSize: LABEL_FONT_SIZE,
-      textBold: 1,
-      textItalics: 0,
-      textAlign: 0,
-      textEditable: 1,
-      showLassoAfterInsert: false,
-    })) as ApiRes<boolean>;
+  const bottom = pageHeight - BOTTOM_MARGIN;
+  const top = bottom - LABEL_BOX_HEIGHT;
 
-    if (!res?.success) {
-      throw new Error(res?.error?.message ?? 'insertText failed');
+  let left = LEFT_MARGIN;
+  for (let i = 0; i < labels.length; i++) {
+    const label = labels[i];
+    const right = left + boxWidths[i];
+
+    if (isNote) {
+      const textRect = {left, top, right, bottom};
+      const res = (await PluginNoteAPI.insertText({
+        textContentFull: label,
+        textRect,
+        fontSize: LABEL_FONT_SIZE,
+        textBold: 1,
+        textItalics: 0,
+        textAlign: 0,
+        textEditable: 1,
+        showLassoAfterInsert: false,
+      })) as ApiRes<boolean>;
+
+      if (!res?.success) {
+        throw new Error(res?.error?.message ?? 'insertText failed');
+      }
     }
 
-  }
-
-  // Add to native keyword index for page navigation
-  if (filePath !== undefined && pageNum !== undefined) {
-    const kwRes = (await PluginFileAPI.insertKeyWord(filePath, pageNum, label)) as ApiRes<boolean>;
-    if (!isNote && !kwRes?.success) {
-      throw new Error(kwRes?.error?.message ?? 'Keyword indexing not supported for this file type');
+    if (filePath !== undefined && pageNum !== undefined) {
+      const kwRes = (await PluginFileAPI.insertKeyWord(filePath, pageNum, label)) as ApiRes<boolean>;
+      if (!isNote && !kwRes?.success) {
+        throw new Error(kwRes?.error?.message ?? 'Keyword indexing not supported for this file type');
+      }
     }
+
+    left = right + H_GAP;
   }
 }
 
@@ -116,6 +131,7 @@ async function doInsertKeyword(label: string): Promise<void> {
 export default function KeywordPanel({keywords, onManage}: Props) {
   const [inserting, setInserting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const sectionYRef = useRef<Record<string, number>>({});
@@ -168,24 +184,40 @@ export default function KeywordPanel({keywords, onManage}: Props) {
     errorTimerRef.current = setTimeout(() => setError(null), ERROR_DISPLAY_MS);
   }, []);
 
-  const handleInsert = useCallback(
-    async (kw: Keyword) => {
-      if (inserting) {
-        return;
-      }
-      setInserting(true);
-      setError(null);
-      try {
-        await doInsertKeyword(kw.label);
-        PluginManager.closePluginView();
-      } catch (e) {
-        showError(e instanceof Error ? e.message : 'Insert failed');
-      } finally {
-        setInserting(false);
-      }
+  const handleToggleSelect = useCallback(
+    (id: string) => {
+      setSelectedIds(prev => {
+        if (prev.includes(id)) {
+          return prev.filter(x => x !== id);
+        }
+        if (prev.length >= MAX_SELECT) {
+          showError(`Max ${MAX_SELECT} keywords`);
+          return prev;
+        }
+        return [...prev, id];
+      });
     },
-    [inserting, showError],
+    [showError],
   );
+
+  const handleInsertSelected = useCallback(async () => {
+    if (inserting || selectedIds.length === 0) {
+      return;
+    }
+    setInserting(true);
+    setError(null);
+    try {
+      const labels = selectedIds
+        .map(id => keywords.find(k => k.id === id)?.label ?? '')
+        .filter(Boolean);
+      await doInsertKeywords(labels);
+      PluginManager.closePluginView();
+    } catch (e) {
+      showError(e instanceof Error ? e.message : 'Insert failed');
+    } finally {
+      setInserting(false);
+    }
+  }, [inserting, selectedIds, keywords, showError]);
 
   const handleClose = useCallback(() => {
     if (!inserting) {
@@ -200,6 +232,7 @@ export default function KeywordPanel({keywords, onManage}: Props) {
     }
   }, []);
 
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   // ── Render ──
 
@@ -230,6 +263,10 @@ export default function KeywordPanel({keywords, onManage}: Props) {
             </Pressable>
           </View>
           <View style={styles.divider} />
+          <View style={styles.subheader}>
+            <Text style={styles.subheaderText}>Select up to 4 keywords, then tap Insert</Text>
+          </View>
+          <View style={styles.divider} />
 
           {/* ── Error banner ── */}
           {error != null && (
@@ -252,7 +289,11 @@ export default function KeywordPanel({keywords, onManage}: Props) {
                 {pinned.map((kw, idx) => (
                   <React.Fragment key={kw.id}>
                     {idx > 0 && <View style={styles.itemDivider} />}
-                    <KeywordItem kw={kw} onPress={handleInsert} />
+                    <KeywordItem
+                      kw={kw}
+                      selected={selectedSet.has(kw.id)}
+                      onToggleSelect={handleToggleSelect}
+                    />
                   </React.Fragment>
                 ))}
               </ScrollView>
@@ -303,13 +344,42 @@ export default function KeywordPanel({keywords, onManage}: Props) {
                   {items.map((kw, idx) => (
                     <React.Fragment key={kw.id}>
                       {idx > 0 && <View style={styles.itemDivider} />}
-                      <KeywordItem kw={kw} onPress={handleInsert} />
+                      <KeywordItem
+                        kw={kw}
+                        selected={selectedSet.has(kw.id)}
+                        onToggleSelect={handleToggleSelect}
+                      />
                     </React.Fragment>
                   ))}
                 </View>
               ))}
             </ScrollView>
           )}
+
+          {/* ── Insert bar ── */}
+          <View style={styles.divider} />
+          <View style={styles.insertBar}>
+            <Text style={styles.selectHint}>
+              {selectedIds.length === 0
+                ? 'None selected'
+                : `${selectedIds.length} / ${MAX_SELECT} selected`}
+            </Text>
+            <Pressable
+              onPress={handleInsertSelected}
+              disabled={inserting || selectedIds.length === 0}
+              style={({pressed}) => [
+                styles.insertBtn,
+                (inserting || selectedIds.length === 0) && styles.insertBtnDisabled,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={[
+                styles.insertBtnText,
+                (inserting || selectedIds.length === 0) && styles.insertBtnTextDisabled,
+              ]}>
+                {inserting ? 'Inserting…' : 'Insert'}
+              </Text>
+            </Pressable>
+          </View>
 
         </Pressable>
       </KeyboardAvoidingView>
@@ -321,15 +391,20 @@ export default function KeywordPanel({keywords, onManage}: Props) {
 
 function KeywordItem({
   kw,
-  onPress,
+  selected,
+  onToggleSelect,
 }: {
   kw: Keyword;
-  onPress: (kw: Keyword) => void;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
 }) {
   return (
     <Pressable
       style={({pressed}) => [styles.item, pressed && styles.itemPressed]}
-      onPress={() => onPress(kw)}>
+      onPress={() => onToggleSelect(kw.id)}>
+      <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
+        {selected && <Text style={styles.checkmark}>{'✓'}</Text>}
+      </View>
       <Text style={styles.itemText}>{kw.label}</Text>
     </Pressable>
   );
@@ -408,6 +483,18 @@ const styles = StyleSheet.create({
     marginHorizontal: PANEL_PADDING,
   },
 
+  // Subheader note
+  subheader: {
+    paddingHorizontal: PANEL_PADDING,
+    paddingVertical: 8,
+    backgroundColor: '#F8F8F8',
+  },
+  subheaderText: {
+    fontSize: 13,
+    color: '#666666',
+    textAlign: 'center',
+  },
+
   // Error
   errorBanner: {
     marginHorizontal: PANEL_PADDING,
@@ -484,15 +571,73 @@ const styles = StyleSheet.create({
   item: {
     height: ITEM_HEIGHT,
     paddingHorizontal: PANEL_PADDING,
-    justifyContent: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
   },
   itemPressed: {
     backgroundColor: '#F0F0F0',
   },
   itemText: {
+    flex: 1,
     fontSize: 20,
     color: '#000000',
     fontWeight: '500',
+  },
+
+  // Checkbox
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#AAAAAA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxSelected: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  checkmark: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    lineHeight: 18,
+  },
+
+  // Insert bar
+  insertBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: PANEL_PADDING,
+    paddingVertical: 12,
+    gap: 14,
+  },
+  selectHint: {
+    flex: 1,
+    fontSize: 15,
+    color: '#888888',
+  },
+  insertBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+    backgroundColor: '#000000',
+  },
+  insertBtnDisabled: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#CCCCCC',
+  },
+  insertBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  insertBtnTextDisabled: {
+    color: '#CCCCCC',
   },
 
   // Empty state
