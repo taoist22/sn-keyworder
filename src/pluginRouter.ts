@@ -1,6 +1,7 @@
 import {PluginManager} from 'sn-plugin-lib';
 
 export const BUTTON_ID_TOOLBAR = 100;
+export const BUTTON_ID_LASSO = 200;
 
 export type ButtonEvent = {
   pressEvent: number;
@@ -39,6 +40,12 @@ export function installPluginRouter(): void {
 
 export function getLastButtonEvent(): ButtonEvent | null {
   return lastEvent;
+}
+
+export function consumeLastButtonEvent(): ButtonEvent | null {
+  const val = lastEvent;
+  lastEvent = null;
+  return val;
 }
 
 export function subscribeToButtonEvents(fn: ButtonSubscriber): () => void {

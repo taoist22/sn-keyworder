@@ -19,3 +19,11 @@ PluginManager.registerButton(BUTTON_TYPE_TOOLBAR, ['NOTE', 'DOC'], {
   icon: Image.resolveAssetSource(require('./assets/tag.png')).uri,
   showType: SHOW_TYPE_WITH_UI,
 });
+
+PluginManager.registerButton(2, ['NOTE'], {
+  id: 200,
+  name: 'Keyworder',
+  icon: Image.resolveAssetSource(require('./assets/tag.png')).uri,
+  showType: SHOW_TYPE_WITH_UI,
+  editDataTypes: [0, 3],
+});

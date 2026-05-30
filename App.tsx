@@ -1,15 +1,26 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {installPluginRouter} from './src/pluginRouter';
+import {
+  installPluginRouter,
+  BUTTON_ID_TOOLBAR,
+  BUTTON_ID_LASSO,
+  consumeLastButtonEvent,
+  subscribeToButtonEvents,
+} from './src/pluginRouter';
 import KeywordPanel from './src/KeywordPanel';
 import ConfigPanel from './src/ConfigPanel';
+import LassoAddPanel from './src/LassoAddPanel';
 import {Keyword, loadKeywords, saveKeywords} from './src/storage';
 import {PluginManager} from 'sn-plugin-lib';
 
 installPluginRouter();
 
+type View = 'main' | 'config' | 'lasso-add';
+
 export default function App() {
-  const [view, setView] = useState<'main' | 'config'>('main');
+  const [view, setView] = useState<View>('main');
+  const [lassoKey, setLassoKey] = useState(0);
   const [keywords, setKeywords] = useState<Keyword[]>([]);
+
   useEffect(() => {
     const reload = () =>
       loadKeywords()
@@ -18,19 +29,56 @@ export default function App() {
 
     reload();
 
+    // Consume button pressed before this component mounted
+    const pending = consumeLastButtonEvent();
+    if (pending?.id === BUTTON_ID_LASSO) {
+      setLassoKey(k => k + 1);
+      setView('lasso-add');
+    }
 
-    const sub = PluginManager.addPluginLifeListener({
-      onStart: reload,
-      onStop() {},
+    // Listen for buttons pressed while mounted
+    const unsubscribe = subscribeToButtonEvents(event => {
+      if (event.id === BUTTON_ID_LASSO) {
+        setLassoKey(k => k + 1);
+        setView('lasso-add');
+      } else if (event.id === BUTTON_ID_TOOLBAR) {
+        setView('main');
+      }
     });
 
-    return () => sub.remove();
+    const lifeSub = PluginManager.addPluginLifeListener({
+      onStart: reload,
+      onStop() {
+        setView('main');
+      },
+    });
+
+    return () => {
+      unsubscribe();
+      lifeSub.remove();
+    };
   }, []);
 
   const updateKeywords = useCallback(async (kws: Keyword[]) => {
     setKeywords(kws);
     await saveKeywords(kws);
   }, []);
+
+  const handleKeywordAdded = useCallback(async (kw: Keyword) => {
+    const updated = [...keywords, kw];
+    await updateKeywords(updated);
+  }, [keywords, updateKeywords]);
+
+  if (view === 'lasso-add') {
+    return (
+      <LassoAddPanel
+        key={lassoKey}
+        keywords={keywords}
+        onAdded={handleKeywordAdded}
+        onDone={() => setView('main')}
+      />
+    );
+  }
 
   if (view === 'config') {
     return (

@@ -14,6 +14,7 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 ## Features
 
 - **Multi-keyword insertion** — check up to 4 keywords at once and insert them all in one tap; each keyword lands as a separate, movable element in a horizontal row at the bottom of the page
+- **Lasso to add keyword** — lasso any handwritten or typed text, tap the Keyworder button in the lasso toolbar, and save it directly to your keyword list; works with OCR for handwriting
 - **Native index integration** — automatically adds each keyword to the device's built-in keyword index for page navigation
 - **In-plugin keyword management** — add, delete, and pin keywords directly from the plugin; changes persist automatically
 - **Bulk import** — load a list of keywords at once from a JSON file you drop onto the device
@@ -63,9 +64,20 @@ You can import a large list of keywords at once by dropping a JSON file onto you
 
 ## Usage
 
+### Inserting keywords onto a page
+
 1. Open a note and tap the **plugin icon** in the toolbar.
 2. Tap one or more keywords to check them (up to 4 at a time). A checkmark appears next to each selected keyword and the count updates in the Insert bar at the bottom.
 3. Tap **Insert**. Each keyword is stamped onto the page as a separate element in a horizontal row at the bottom — use lasso to move individual keywords to your desired locations. All inserted keywords are also added to the native keyword navigation index.
+
+### Adding a keyword by lassoing text
+
+You can add a word or phrase to your keyword list directly from the page without opening the main panel:
+
+1. Use lasso to select handwritten strokes or a typed text box containing the text you want to save as a keyword.
+2. Tap the **Keyworder** button in the lasso toolbar. For handwriting, the plugin will recognise the text automatically.
+3. Review or edit the pre-filled text in the **Add as Keyword** panel, then tap **Add**.
+4. The keyword is saved to your list and registered in the native keyword index for the current page. The plugin returns to the main keyword panel.
 
 ## Building from Source
 
