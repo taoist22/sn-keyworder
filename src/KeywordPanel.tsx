@@ -1,10 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -14,8 +8,13 @@ import {
   Text,
   View,
 } from 'react-native';
-import {PluginCommAPI, PluginFileAPI, PluginManager, PluginNoteAPI} from 'sn-plugin-lib';
-import {Keyword} from './storage';
+import {
+  PluginCommAPI,
+  PluginFileAPI,
+  PluginManager,
+  PluginNoteAPI,
+} from 'sn-plugin-lib';
+import {Keyword, keywordValue} from './storage';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -24,7 +23,6 @@ const PANEL_PADDING = 20;
 const ITEM_HEIGHT = 60;
 const SECTION_HEADER_HEIGHT = 28;
 const ERROR_DISPLAY_MS = 2500;
-const MAX_SELECT = 4;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -38,6 +36,8 @@ type Props = {
   onManage: () => void;
 };
 
+type Filter = 'all' | 'pinned' | `key:${string}`;
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_PAGE_WIDTH = 1404;
@@ -46,6 +46,98 @@ const LABEL_FONT_SIZE = 40;
 const LABEL_BOX_HEIGHT = 50;
 const BOTTOM_MARGIN = 160;
 const LEFT_MARGIN = 180;
+const RIGHT_MARGIN = 20;
+const TOP_MARGIN = 80;
+const H_GAP = 40;
+const V_GAP = 24;
+const MIN_LABEL_BOX_WIDTH = LABEL_FONT_SIZE * 4;
+const KEY_FILTER_PREFIX = 'key:';
+
+type LayoutBox = {
+  label: string;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+function estimateLabelWidth(label: string): number {
+  return Math.max(
+    MIN_LABEL_BOX_WIDTH,
+    Math.ceil(label.length * LABEL_FONT_SIZE * 0.8 * 1.15),
+  );
+}
+
+function createKeywordLayout(
+  labels: string[],
+  pageWidth: number,
+  pageHeight: number,
+): LayoutBox[] {
+  const maxRight = Math.max(
+    LEFT_MARGIN + MIN_LABEL_BOX_WIDTH,
+    pageWidth - RIGHT_MARGIN,
+  );
+  const maxWidth = Math.max(MIN_LABEL_BOX_WIDTH, maxRight - LEFT_MARGIN);
+  const rows: Array<Array<{label: string; width: number}>> = [];
+  let currentRow: Array<{label: string; width: number}> = [];
+  let currentWidth = 0;
+
+  for (const label of labels) {
+    const width = Math.min(estimateLabelWidth(label), maxWidth);
+    const nextWidth =
+      currentRow.length === 0 ? width : currentWidth + H_GAP + width;
+
+    if (currentRow.length > 0 && nextWidth > maxWidth) {
+      rows.push(currentRow);
+      currentRow = [{label, width}];
+      currentWidth = width;
+    } else {
+      currentRow.push({label, width});
+      currentWidth = nextWidth;
+    }
+  }
+
+  if (currentRow.length > 0) {
+    rows.push(currentRow);
+  }
+
+  const firstBottom = pageHeight - BOTTOM_MARGIN;
+  const availableHeight = Math.max(LABEL_BOX_HEIGHT, firstBottom - TOP_MARGIN);
+  const naturalRowsHeight =
+    rows.length * LABEL_BOX_HEIGHT + Math.max(0, rows.length - 1) * V_GAP;
+  const rowGap =
+    rows.length > 1 && naturalRowsHeight > availableHeight
+      ? Math.max(
+          8,
+          Math.floor(
+            (availableHeight - rows.length * LABEL_BOX_HEIGHT) /
+              (rows.length - 1),
+          ),
+        )
+      : V_GAP;
+  const rowStride = LABEL_BOX_HEIGHT + rowGap;
+  const boxes: LayoutBox[] = [];
+
+  rows.forEach((row, rowIndex) => {
+    const bottom = firstBottom - rowIndex * rowStride;
+    const top = bottom - LABEL_BOX_HEIGHT;
+    let left = LEFT_MARGIN;
+
+    row.forEach(item => {
+      const right = Math.min(maxRight, left + item.width);
+      boxes.push({
+        label: item.label,
+        left,
+        top,
+        right,
+        bottom: top + LABEL_BOX_HEIGHT,
+      });
+      left = right + H_GAP;
+    });
+  });
+
+  return boxes;
+}
 
 async function doInsertKeywords(labels: string[]): Promise<void> {
   let pageWidth = DEFAULT_PAGE_WIDTH;
@@ -54,7 +146,8 @@ async function doInsertKeywords(labels: string[]): Promise<void> {
   let pageNum: number | undefined;
 
   try {
-    const pathRes = (await PluginCommAPI.getCurrentFilePath()) as ApiRes<string>;
+    const pathRes =
+      (await PluginCommAPI.getCurrentFilePath()) as ApiRes<string>;
     const pageRes = (await PluginCommAPI.getCurrentPageNum()) as ApiRes<number>;
     if (pathRes?.success && pageRes?.success) {
       filePath = pathRes.result as string;
@@ -74,28 +167,10 @@ async function doInsertKeywords(labels: string[]): Promise<void> {
 
   const isNote = filePath?.toLowerCase().endsWith('.note') ?? true;
 
-  // Lay keywords out horizontally at the bottom with a gap between each box.
-  // Natural widths are scaled down proportionally if the total exceeds available space.
-  const H_GAP = 40;
-  const count = labels.length;
-  const available = pageWidth - LEFT_MARGIN - 20 - H_GAP * (count - 1);
-  const naturalWidths = labels.map(label =>
-    Math.max(
-      LABEL_FONT_SIZE * 4,
-      Math.ceil(label.length * LABEL_FONT_SIZE * 0.80 * 1.15),
-    ),
-  );
-  const totalNatural = naturalWidths.reduce((a, b) => a + b, 0);
-  const scale = totalNatural > available ? available / totalNatural : 1;
-  const boxWidths = naturalWidths.map(w => Math.floor(w * scale));
+  const boxes = createKeywordLayout(labels, pageWidth, pageHeight);
 
-  const bottom = pageHeight - BOTTOM_MARGIN;
-  const top = bottom - LABEL_BOX_HEIGHT;
-
-  let left = LEFT_MARGIN;
-  for (let i = 0; i < labels.length; i++) {
-    const label = labels[i];
-    const right = left + boxWidths[i];
+  for (const box of boxes) {
+    const {label, left, top, right, bottom} = box;
 
     if (isNote) {
       const textRect = {left, top, right, bottom};
@@ -116,13 +191,17 @@ async function doInsertKeywords(labels: string[]): Promise<void> {
     }
 
     if (filePath !== undefined && pageNum !== undefined) {
-      const kwRes = (await PluginFileAPI.insertKeyWord(filePath, pageNum, label)) as ApiRes<boolean>;
-      if (!isNote && !kwRes?.success) {
-        throw new Error(kwRes?.error?.message ?? 'Keyword indexing not supported for this file type');
+      const kwRes = (await PluginFileAPI.insertKeyWord(
+        filePath,
+        pageNum,
+        label,
+      )) as ApiRes<boolean>;
+      if (!kwRes?.success) {
+        throw new Error(
+          kwRes?.error?.message ?? `Keyword indexing failed for "${label}"`,
+        );
       }
     }
-
-    left = right + H_GAP;
   }
 }
 
@@ -132,6 +211,7 @@ export default function KeywordPanel({keywords, onManage}: Props) {
   const [inserting, setInserting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [filter, setFilter] = useState<Filter>('all');
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const sectionYRef = useRef<Record<string, number>>({});
@@ -145,14 +225,37 @@ export default function KeywordPanel({keywords, onManage}: Props) {
   }, []);
 
   // Pinned keywords in insertion order
-  const pinned = useMemo(
-    () => keywords.filter(k => k.pinned),
+  const pinned = useMemo(() => keywords.filter(k => k.pinned), [keywords]);
+
+  const filterKeys = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          keywords.map(k => k.key).filter((key): key is string => Boolean(key)),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
     [keywords],
+  );
+
+  const visibleKeywords = useMemo(() => {
+    if (filter === 'pinned') {
+      return keywords.filter(k => k.pinned);
+    }
+    if (filter.startsWith(KEY_FILTER_PREFIX)) {
+      const key = filter.slice(KEY_FILTER_PREFIX.length);
+      return keywords.filter(k => k.key === key);
+    }
+    return keywords;
+  }, [filter, keywords]);
+
+  const visibleIds = useMemo(
+    () => visibleKeywords.map(k => k.id),
+    [visibleKeywords],
   );
 
   // All keywords grouped by first letter, alphabetical
   const sections = useMemo(() => {
-    const sorted = [...keywords].sort((a, b) =>
+    const sorted = [...visibleKeywords].sort((a, b) =>
       a.label.localeCompare(b.label),
     );
     const map = new Map<string, Keyword[]>();
@@ -167,7 +270,7 @@ export default function KeywordPanel({keywords, onManage}: Props) {
       letter,
       items,
     }));
-  }, [keywords]);
+  }, [visibleKeywords]);
 
   const activeLetters = useMemo(
     () => new Set(sections.map(s => s.letter)),
@@ -184,21 +287,22 @@ export default function KeywordPanel({keywords, onManage}: Props) {
     errorTimerRef.current = setTimeout(() => setError(null), ERROR_DISPLAY_MS);
   }, []);
 
-  const handleToggleSelect = useCallback(
-    (id: string) => {
-      setSelectedIds(prev => {
-        if (prev.includes(id)) {
-          return prev.filter(x => x !== id);
-        }
-        if (prev.length >= MAX_SELECT) {
-          showError(`Max ${MAX_SELECT} keywords`);
-          return prev;
-        }
-        return [...prev, id];
-      });
-    },
-    [showError],
-  );
+  const handleToggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(x => x !== id);
+      }
+      return [...prev, id];
+    });
+  }, []);
+
+  const handleSelectVisible = useCallback(() => {
+    setSelectedIds(prev => Array.from(new Set([...prev, ...visibleIds])));
+  }, [visibleIds]);
+
+  const handleClearSelected = useCallback(() => {
+    setSelectedIds([]);
+  }, []);
 
   const handleInsertSelected = useCallback(async () => {
     if (inserting || selectedIds.length === 0) {
@@ -208,7 +312,10 @@ export default function KeywordPanel({keywords, onManage}: Props) {
     setError(null);
     try {
       const labels = selectedIds
-        .map(id => keywords.find(k => k.id === id)?.label ?? '')
+        .map(id => {
+          const kw = keywords.find(k => k.id === id);
+          return kw ? keywordValue(kw) : '';
+        })
         .filter(Boolean);
       await doInsertKeywords(labels);
       PluginManager.closePluginView();
@@ -233,6 +340,14 @@ export default function KeywordPanel({keywords, onManage}: Props) {
   }, []);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedVisibleCount = useMemo(
+    () => visibleIds.filter(id => selectedSet.has(id)).length,
+    [selectedSet, visibleIds],
+  );
+  const canSelectFilter =
+    filter !== 'all' &&
+    visibleIds.length > 0 &&
+    selectedVisibleCount < visibleIds.length;
 
   // ── Render ──
 
@@ -241,7 +356,6 @@ export default function KeywordPanel({keywords, onManage}: Props) {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Pressable style={styles.panel} onPress={e => e.stopPropagation()}>
-
           {/* ── Header ── */}
           <View style={styles.header}>
             <Text style={styles.title}>Keyword Page</Text>
@@ -264,7 +378,9 @@ export default function KeywordPanel({keywords, onManage}: Props) {
           </View>
           <View style={styles.divider} />
           <View style={styles.subheader}>
-            <Text style={styles.subheaderText}>Select up to 4 keywords, then tap Insert</Text>
+            <Text style={styles.subheaderText}>
+              Select keywords, then tap Insert
+            </Text>
           </View>
           <View style={styles.divider} />
 
@@ -275,8 +391,38 @@ export default function KeywordPanel({keywords, onManage}: Props) {
             </View>
           )}
 
+          {/* ── Filter row ── */}
+          <View style={styles.filterWrap}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRow}>
+              <FilterChip
+                label="All"
+                active={filter === 'all'}
+                onPress={() => setFilter('all')}
+              />
+              {pinned.length > 0 && (
+                <FilterChip
+                  label="Pinned"
+                  active={filter === 'pinned'}
+                  onPress={() => setFilter('pinned')}
+                />
+              )}
+              {filterKeys.map(key => (
+                <FilterChip
+                  key={key}
+                  label={key}
+                  active={filter === `${KEY_FILTER_PREFIX}${key}`}
+                  onPress={() => setFilter(`${KEY_FILTER_PREFIX}${key}`)}
+                />
+              ))}
+            </ScrollView>
+          </View>
+          <View style={styles.divider} />
+
           {/* ── Pinned section ── */}
-          {pinned.length > 0 && (
+          {filter === 'all' && pinned.length > 0 && (
             <>
               <View style={styles.sectionLabel}>
                 <Text style={styles.sectionLabelText}>PINNED</Text>
@@ -304,17 +450,19 @@ export default function KeywordPanel({keywords, onManage}: Props) {
           {/* ── A-Z jump row (active letters only, full width) ── */}
           {activeLetters.size > 0 && (
             <View style={styles.jumpRow}>
-              {Array.from(activeLetters).sort().map(letter => (
-                <Pressable
-                  key={letter}
-                  onPress={() => handleJump(letter)}
-                  style={({pressed}) => [
-                    styles.jumpBtn,
-                    pressed && styles.jumpBtnPressed,
-                  ]}>
-                  <Text style={styles.jumpBtnText}>{letter}</Text>
-                </Pressable>
-              ))}
+              {Array.from(activeLetters)
+                .sort()
+                .map(letter => (
+                  <Pressable
+                    key={letter}
+                    onPress={() => handleJump(letter)}
+                    style={({pressed}) => [
+                      styles.jumpBtn,
+                      pressed && styles.jumpBtnPressed,
+                    ]}>
+                    <Text style={styles.jumpBtnText}>{letter}</Text>
+                  </Pressable>
+                ))}
             </View>
           )}
 
@@ -324,7 +472,9 @@ export default function KeywordPanel({keywords, onManage}: Props) {
           {sections.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>
-                {'No keywords yet.\nTap Manage to add your first keyword.'}
+                {filter === 'all'
+                  ? 'No keywords yet.\nTap Manage to add your first keyword.'
+                  : 'No keywords in this view.'}
               </Text>
             </View>
           ) : (
@@ -358,29 +508,56 @@ export default function KeywordPanel({keywords, onManage}: Props) {
 
           {/* ── Insert bar ── */}
           <View style={styles.divider} />
+          <View style={styles.selectionTools}>
+            {filter !== 'all' && (
+              <Pressable
+                onPress={handleSelectVisible}
+                disabled={!canSelectFilter}
+                style={({pressed}) => [
+                  styles.toolBtn,
+                  pressed && styles.btnPressed,
+                  !canSelectFilter && styles.toolBtnDisabled,
+                ]}>
+                <Text style={styles.toolBtnText}>Select Filter</Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={handleClearSelected}
+              disabled={selectedIds.length === 0}
+              style={({pressed}) => [
+                styles.toolBtn,
+                pressed && styles.btnPressed,
+                selectedIds.length === 0 && styles.toolBtnDisabled,
+              ]}>
+              <Text style={styles.toolBtnText}>Clear</Text>
+            </Pressable>
+          </View>
+          <View style={styles.divider} />
           <View style={styles.insertBar}>
             <Text style={styles.selectHint}>
               {selectedIds.length === 0
                 ? 'None selected'
-                : `${selectedIds.length} / ${MAX_SELECT} selected`}
+                : `${selectedIds.length} selected`}
             </Text>
             <Pressable
               onPress={handleInsertSelected}
               disabled={inserting || selectedIds.length === 0}
               style={({pressed}) => [
                 styles.insertBtn,
-                (inserting || selectedIds.length === 0) && styles.insertBtnDisabled,
+                (inserting || selectedIds.length === 0) &&
+                  styles.insertBtnDisabled,
                 pressed && styles.btnPressed,
               ]}>
-              <Text style={[
-                styles.insertBtnText,
-                (inserting || selectedIds.length === 0) && styles.insertBtnTextDisabled,
-              ]}>
+              <Text
+                style={[
+                  styles.insertBtnText,
+                  (inserting || selectedIds.length === 0) &&
+                    styles.insertBtnTextDisabled,
+                ]}>
                 {inserting ? 'Inserting…' : 'Insert'}
               </Text>
             </Pressable>
           </View>
-
         </Pressable>
       </KeyboardAvoidingView>
     </Pressable>
@@ -405,7 +582,39 @@ function KeywordItem({
       <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
         {selected && <Text style={styles.checkmark}>{'✓'}</Text>}
       </View>
-      <Text style={styles.itemText}>{kw.label}</Text>
+      <View style={styles.itemTextWrap}>
+        <Text style={styles.itemText}>{kw.label}</Text>
+        {kw.key != null && (
+          <Text style={styles.itemMeta}>
+            {kw.key}:{kw.label}
+          </Text>
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({pressed}) => [
+        styles.filterChip,
+        active && styles.filterChipActive,
+        pressed && styles.btnPressed,
+      ]}>
+      <Text
+        style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -511,6 +720,36 @@ const styles = StyleSheet.create({
   },
 
   // Pinned section
+  filterWrap: {
+    backgroundColor: '#FFFFFF',
+  },
+  filterRow: {
+    paddingHorizontal: PANEL_PADDING,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  filterChip: {
+    minWidth: 58,
+    height: 34,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#999999',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  filterChipActive: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  filterChipText: {
+    fontSize: 13,
+    color: '#555555',
+    fontWeight: '700',
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
+  },
   sectionLabel: {
     paddingHorizontal: PANEL_PADDING,
     paddingTop: 10,
@@ -579,10 +818,43 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F0',
   },
   itemText: {
-    flex: 1,
     fontSize: 20,
     color: '#000000',
     fontWeight: '500',
+  },
+  itemTextWrap: {
+    flex: 1,
+  },
+  itemMeta: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#777777',
+    fontWeight: '600',
+  },
+  // Selection tools
+  selectionTools: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: PANEL_PADDING,
+    paddingVertical: 8,
+    gap: 10,
+  },
+  toolBtn: {
+    flex: 1,
+    height: 34,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#777777',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolBtnDisabled: {
+    opacity: 0.35,
+  },
+  toolBtnText: {
+    fontSize: 13,
+    color: '#333333',
+    fontWeight: '700',
   },
 
   // Checkbox

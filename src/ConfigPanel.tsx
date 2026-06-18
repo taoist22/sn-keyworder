@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import {FileUtils} from 'sn-plugin-lib';
-import {Keyword, makeId} from './storage';
+import {Keyword, keywordSignature, makeId, normalizeKey} from './storage';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -18,7 +18,8 @@ const PANEL_PADDING = 20;
 const ITEM_HEIGHT = 64;
 
 const IMPORT_DIR = '/storage/emulated/0/MyStyle/SnKeyworder';
-const IMPORT_URL = 'file:///storage/emulated/0/MyStyle/SnKeyworder/keywords.json';
+const IMPORT_URL =
+  'file:///storage/emulated/0/MyStyle/SnKeyworder/keywords.json';
 const IMPORT_MSG_MS = 4000;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -29,20 +30,55 @@ type Props = {
   onBack: () => void;
 };
 
+function uniqueKeywords(items: Keyword[], existingItems: Keyword[]): Keyword[] {
+  const seen = new Set(existingItems.map(keywordSignature));
+  const unique: Keyword[] = [];
+  for (const item of items) {
+    const signature = keywordSignature(item);
+    if (!seen.has(signature)) {
+      seen.add(signature);
+      unique.push(item);
+    }
+  }
+  return unique;
+}
+
+function parseImportItem(item: any): Pick<Keyword, 'label' | 'key'> | null {
+  if (typeof item === 'string') {
+    const label = item.trim();
+    return label ? {label} : null;
+  }
+
+  const label = typeof item?.label === 'string' ? item.label.trim() : '';
+  if (!label) {
+    return null;
+  }
+  return {label, key: normalizeKey(item.key)};
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
   const [adding, setAdding] = useState(false);
   const [newLabel, setNewLabel] = useState('');
+  const [newKey, setNewKey] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const importMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const normalizedNewKey = normalizeKey(newKey);
+  const addPreview = newLabel.trim()
+    ? normalizedNewKey
+      ? `${normalizedNewKey}:${newLabel.trim()}`
+      : newLabel.trim()
+    : '';
 
   useEffect(() => {
     return () => {
-      if (importMsgTimerRef.current) clearTimeout(importMsgTimerRef.current);
+      if (importMsgTimerRef.current) {
+        clearTimeout(importMsgTimerRef.current);
+      }
     };
   }, []);
 
@@ -68,6 +104,7 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
   const handleStartAdd = useCallback(() => {
     setAdding(true);
     setNewLabel('');
+    setNewKey('');
     setAddError(null);
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
@@ -78,59 +115,85 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
       setAdding(false);
       return;
     }
+    const key = normalizeKey(newKey);
+    const nextKeyword = {id: makeId(), label, pinned: false, key};
     const isDupe = keywords.some(
-      k => k.label.toLowerCase() === label.toLowerCase(),
+      k => keywordSignature(k) === keywordSignature(nextKeyword),
     );
     if (isDupe) {
-      setAddError(`"${label}" already exists`);
+      setAddError(`"${key ? `${key}:${label}` : label}" already exists`);
       return;
     }
-    const updated = [...keywords, {id: makeId(), label, pinned: false}];
+    const updated = [...keywords, nextKeyword];
     await onUpdate(updated);
     setAdding(false);
     setNewLabel('');
+    setNewKey('');
     setAddError(null);
-  }, [newLabel, keywords, onUpdate]);
+  }, [newLabel, newKey, keywords, onUpdate]);
 
   const handleCancelAdd = useCallback(() => {
     setAdding(false);
     setNewLabel('');
+    setNewKey('');
     setAddError(null);
   }, []);
 
   const handleImport = useCallback(async () => {
-    if (importing) return;
+    if (importing) {
+      return;
+    }
     setImporting(true);
     setImportMsg(null);
-    if (importMsgTimerRef.current) clearTimeout(importMsgTimerRef.current);
+    if (importMsgTimerRef.current) {
+      clearTimeout(importMsgTimerRef.current);
+    }
     const scheduleHide = (msg: string) => {
       setImportMsg(msg);
-      importMsgTimerRef.current = setTimeout(() => setImportMsg(null), IMPORT_MSG_MS);
+      importMsgTimerRef.current = setTimeout(
+        () => setImportMsg(null),
+        IMPORT_MSG_MS,
+      );
     };
     try {
-      try { await (FileUtils as any).makeDir(IMPORT_DIR); } catch {}
+      try {
+        await (FileUtils as any).makeDir(IMPORT_DIR);
+      } catch {}
       const response = await fetch(IMPORT_URL);
-      if (!response.ok) throw new Error('not_found');
+      if (!response.ok) {
+        throw new Error('not_found');
+      }
       const data = await response.json();
-      if (!Array.isArray(data)) throw new Error('invalid');
-      const labels: string[] = (data as any[])
-        .map(item => (typeof item === 'string' ? item.trim() : item?.label?.trim()))
-        .filter(Boolean);
-      const existingLower = new Set(keywords.map(k => k.label.toLowerCase()));
-      const toAdd: Keyword[] = labels
-        .filter(label => !existingLower.has(label.toLowerCase()))
-        .map(label => ({id: makeId(), label, pinned: false}));
+      if (!Array.isArray(data)) {
+        throw new Error('invalid');
+      }
+      const parsed = (data as any[])
+        .map(parseImportItem)
+        .filter(Boolean) as Array<Pick<Keyword, 'label' | 'key'>>;
+      const toAdd = uniqueKeywords(
+        parsed.map(item => ({
+          id: makeId(),
+          label: item.label,
+          pinned: false,
+          key: normalizeKey(item.key),
+        })),
+        keywords,
+      );
       if (toAdd.length === 0) {
         scheduleHide('No new keywords — all already in list');
       } else {
         await onUpdate([...keywords, ...toAdd]);
-        scheduleHide(`Imported ${toAdd.length} keyword${toAdd.length !== 1 ? 's' : ''}`);
+        scheduleHide(
+          `Imported ${toAdd.length} keyword${toAdd.length !== 1 ? 's' : ''}`,
+        );
       }
     } catch (e: any) {
       if (e?.message === 'invalid') {
-        scheduleHide('Invalid format — use ["keyword1", "keyword2"]');
+        scheduleHide('Invalid format — use strings or {label,key}');
       } else {
-        scheduleHide('keywords.json not found — place it at MyStyle/SnKeyworder/');
+        scheduleHide(
+          'keywords.json not found — place it at MyStyle/SnKeyworder/',
+        );
       }
     } finally {
       setImporting(false);
@@ -165,106 +228,148 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
 
   return (
     <TouchableWithoutFeedback onPress={onBack}>
-    <View style={styles.overlay}>
-    <View style={styles.panel} onStartShouldSetResponder={() => true} onPress={e => e.stopPropagation()}>
-
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <Pressable
-          onPress={onBack}
-          style={({pressed}) => [
-            styles.backBtn,
-            pressed && styles.btnPressed,
-          ]}>
-          <Text style={styles.backBtnText}>{'← Back'}</Text>
-        </Pressable>
-        <Text style={styles.title}>Manage Keywords</Text>
-      </View>
-      <View style={styles.divider} />
-
-      {/* ── Legend + Add + Import buttons ── */}
-      <View style={styles.legendRow}>
-        <Text style={styles.legendText}>{'★ pin   ✕ delete'}</Text>
-        <Pressable
-          onPress={handleImport}
-          disabled={importing}
-          style={({pressed}) => [styles.importBtn, pressed && styles.btnPressed, importing && styles.btnDisabled]}>
-          <Text style={styles.importBtnText}>{importing ? '…' : 'Import'}</Text>
-        </Pressable>
-        <Pressable
-          onPress={handleStartAdd}
-          style={({pressed}) => [styles.addBtn, pressed && styles.btnPressed]}>
-          <Text style={styles.addBtnText}>{'+ Add'}</Text>
-        </Pressable>
-      </View>
-      {importMsg != null && (
-        <View style={styles.importMsgBanner}>
-          <Text style={styles.importMsgText}>{importMsg}</Text>
-        </View>
-      )}
-      <View style={styles.lightDivider} />
-
-      {/* ── Add input ── */}
-      {adding && (
-        <>
-          <View style={styles.addRow}>
-            <TextInput
-              ref={inputRef}
-              style={styles.addInput}
-              value={newLabel}
-              onChangeText={text => {setNewLabel(text); setAddError(null);}}
-              placeholder="New keyword…"
-              placeholderTextColor="#999"
-              autoCapitalize="characters"
-              returnKeyType="done"
-              onSubmitEditing={handleConfirmAdd}
-              maxLength={40}
-            />
+      <View style={styles.overlay}>
+        <View style={styles.panel} onStartShouldSetResponder={() => true}>
+          {/* ── Header ── */}
+          <View style={styles.header}>
             <Pressable
-              onPress={handleConfirmAdd}
-              style={({pressed}) => [styles.addConfirmBtn, pressed && styles.btnPressed]}>
-              <Text style={styles.addConfirmText}>{'✓'}</Text>
+              onPress={onBack}
+              style={({pressed}) => [
+                styles.backBtn,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.backBtnText}>{'← Back'}</Text>
+            </Pressable>
+            <Text style={styles.title}>Manage Keywords</Text>
+          </View>
+          <View style={styles.divider} />
+
+          {/* ── Legend + Add + Import buttons ── */}
+          <View style={styles.legendRow}>
+            <Text style={styles.legendText}>{'★ pin   ✕ delete'}</Text>
+            <Pressable
+              onPress={handleImport}
+              disabled={importing}
+              style={({pressed}) => [
+                styles.importBtn,
+                pressed && styles.btnPressed,
+                importing && styles.btnDisabled,
+              ]}>
+              <Text style={styles.importBtnText}>
+                {importing ? '…' : 'Import'}
+              </Text>
             </Pressable>
             <Pressable
-              onPress={handleCancelAdd}
-              style={({pressed}) => [styles.addCancelBtn, pressed && styles.btnPressed]}>
-              <Text style={styles.addCancelText}>{'✕'}</Text>
+              onPress={handleStartAdd}
+              style={({pressed}) => [
+                styles.addBtn,
+                pressed && styles.btnPressed,
+              ]}>
+              <Text style={styles.addBtnText}>{'+ Add'}</Text>
             </Pressable>
           </View>
-          {addError != null && (
-            <View style={styles.addErrorBanner}>
-              <Text style={styles.addErrorText}>{addError}</Text>
+          {importMsg != null && (
+            <View style={styles.importMsgBanner}>
+              <Text style={styles.importMsgText}>{importMsg}</Text>
             </View>
           )}
           <View style={styles.lightDivider} />
-        </>
-      )}
 
-      {/* ── Keyword list ── */}
-      {sorted.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>
-            {'No keywords yet.\nGo back and tap "+ Add".'}
-          </Text>
+          {/* ── Add input ── */}
+          {adding && (
+            <>
+              <View style={styles.addRow}>
+                <View style={styles.addField}>
+                  <Text style={styles.inputLabel}>Keyword</Text>
+                  <TextInput
+                    ref={inputRef}
+                    style={styles.addInput}
+                    value={newLabel}
+                    onChangeText={text => {
+                      setNewLabel(text);
+                      setAddError(null);
+                    }}
+                    placeholder="New keyword"
+                    placeholderTextColor="#999"
+                    autoCapitalize="characters"
+                    returnKeyType="done"
+                    onSubmitEditing={handleConfirmAdd}
+                    maxLength={48}
+                  />
+                </View>
+                <View style={styles.keyField}>
+                  <Text style={styles.inputLabel}>Key</Text>
+                  <TextInput
+                    style={styles.keyInput}
+                    value={newKey}
+                    onChangeText={text => {
+                      setNewKey(text);
+                      setAddError(null);
+                    }}
+                    placeholder="optional"
+                    placeholderTextColor="#999"
+                    autoCapitalize="none"
+                    returnKeyType="done"
+                    onSubmitEditing={handleConfirmAdd}
+                    maxLength={20}
+                  />
+                </View>
+                <Pressable
+                  onPress={handleConfirmAdd}
+                  style={({pressed}) => [
+                    styles.addConfirmBtn,
+                    pressed && styles.btnPressed,
+                  ]}>
+                  <Text style={styles.addConfirmText}>{'✓'}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleCancelAdd}
+                  style={({pressed}) => [
+                    styles.addCancelBtn,
+                    pressed && styles.btnPressed,
+                  ]}>
+                  <Text style={styles.addCancelText}>{'✕'}</Text>
+                </Pressable>
+              </View>
+              {addPreview !== '' && (
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Saves as</Text>
+                  <Text style={styles.previewValue}>{addPreview}</Text>
+                </View>
+              )}
+              {addError != null && (
+                <View style={styles.addErrorBanner}>
+                  <Text style={styles.addErrorText}>{addError}</Text>
+                </View>
+              )}
+              <View style={styles.lightDivider} />
+            </>
+          )}
+
+          {/* ── Keyword list ── */}
+          {sorted.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>
+                {'No keywords yet.\nGo back and tap "+ Add".'}
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={sorted}
+              renderItem={renderItem}
+              keyExtractor={keyExtractor}
+              ItemSeparatorComponent={ItemSeparator}
+              style={styles.list}
+              showsVerticalScrollIndicator={false}
+              getItemLayout={(_, index) => ({
+                length: ITEM_HEIGHT,
+                offset: ITEM_HEIGHT * index,
+                index,
+              })}
+            />
+          )}
         </View>
-      ) : (
-        <FlatList
-          data={sorted}
-          renderItem={renderItem}
-          keyExtractor={keyExtractor}
-          ItemSeparatorComponent={ItemSeparator}
-          style={styles.list}
-          showsVerticalScrollIndicator={false}
-          getItemLayout={(_, index) => ({
-            length: ITEM_HEIGHT,
-            offset: ITEM_HEIGHT * index,
-            index,
-          })}
-        />
-      )}
-
-    </View>
-    </View>
+      </View>
     </TouchableWithoutFeedback>
   );
 }
@@ -292,6 +397,11 @@ function ConfigItem({
       <Text style={styles.itemLabel} numberOfLines={1}>
         {kw.label}
       </Text>
+      {kw.key != null && (
+        <View style={styles.keyBadge}>
+          <Text style={styles.keyBadgeText}>{kw.key}</Text>
+        </View>
+      )}
       <Pressable
         onPress={() => onDelete(kw.id)}
         style={({pressed}) => [styles.deleteBtn, pressed && styles.btnPressed]}>
@@ -421,14 +531,26 @@ const styles = StyleSheet.create({
   // Add input row
   addRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     paddingHorizontal: PANEL_PADDING,
     paddingVertical: 8,
     gap: 8,
     backgroundColor: '#F8F8F8',
   },
-  addInput: {
+  addField: {
     flex: 1,
+  },
+  keyField: {
+    width: 118,
+  },
+  inputLabel: {
+    marginBottom: 4,
+    fontSize: 11,
+    color: '#666666',
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  addInput: {
     height: 44,
     borderWidth: 1.5,
     borderColor: '#000000',
@@ -437,6 +559,35 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#000000',
     backgroundColor: '#FFFFFF',
+  },
+  keyInput: {
+    height: 44,
+    borderWidth: 1.5,
+    borderColor: '#777777',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    fontSize: 15,
+    color: '#000000',
+    backgroundColor: '#FFFFFF',
+  },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: PANEL_PADDING,
+    paddingBottom: 8,
+    gap: 8,
+    backgroundColor: '#F8F8F8',
+  },
+  previewLabel: {
+    fontSize: 12,
+    color: '#777777',
+    fontWeight: '700',
+  },
+  previewValue: {
+    flex: 1,
+    fontSize: 13,
+    color: '#000000',
+    fontWeight: '700',
   },
   addConfirmBtn: {
     width: 44,
@@ -513,6 +664,19 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: '#000000',
     fontWeight: '500',
+  },
+  keyBadge: {
+    maxWidth: 96,
+    borderWidth: 1,
+    borderColor: '#777777',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  keyBadgeText: {
+    fontSize: 12,
+    color: '#555555',
+    fontWeight: '700',
   },
   deleteBtn: {
     width: 36,

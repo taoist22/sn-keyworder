@@ -488,9 +488,70 @@ build_react_native_bundle() {
     write_color_output "Starting React Native bundling..." "Blue"
     local bundle_output="$output_dir/$project_name.bundle"
     local assets_dir="$output_dir"
-    local cmd="npx react-native bundle --entry-file index.js --bundle-output \"$bundle_output\" --platform android --assets-dest \"$assets_dir\" --dev false"
-    write_color_output "Executing command: $cmd" "Yellow"
-    (cd "$project_root" && eval "$cmd") && write_color_output "Bundle generated: $bundle_output" "Green"
+    write_color_output "Executing Metro bundle with watch disabled" "Yellow"
+    (cd "$project_root" && node - "$project_root" "$bundle_output" "$assets_dir" <<'NODE'
+const path = require('path');
+
+const projectRoot = process.argv[2];
+const bundleOutput = process.argv[3];
+const assetsDest = process.argv[4];
+const fromRoot = relPath => path.join(projectRoot, relPath);
+
+process.chdir(projectRoot);
+process.env.NODE_ENV = 'production';
+
+const {loadConfigAsync} = require('@react-native-community/cli-config');
+const loadMetroConfig = require(fromRoot(
+  'node_modules/@react-native/community-cli-plugin/dist/utils/loadMetroConfig.js',
+)).default;
+const Server = require('metro/src/Server');
+const bundleImpl = require('metro/src/shared/output/bundle');
+const saveAssets = require(fromRoot(
+  'node_modules/@react-native/community-cli-plugin/dist/commands/bundle/saveAssets.js',
+)).default;
+
+(async () => {
+  const ctx = await loadConfigAsync({projectRoot});
+  const config = await loadMetroConfig(ctx, {maxWorkers: 1, resetCache: true});
+  const requestOpts = {
+    entryFile: 'index.js',
+    sourceMapUrl: undefined,
+    dev: false,
+    minify: true,
+    platform: 'android',
+    unstable_transformProfile: 'default',
+    customResolverOptions: {},
+  };
+  const args = {
+    bundleOutput,
+    bundleEncoding: 'utf8',
+    sourcemapOutput: undefined,
+    sourcemapSourcesRoot: undefined,
+    sourcemapUseAbsolutePath: false,
+    assetsDest,
+    assetCatalogDest: undefined,
+    platform: 'android',
+  };
+
+  const server = new Server(config, {watch: false});
+  try {
+    const bundle = await bundleImpl.build(server, requestOpts);
+    await bundleImpl.save(bundle, args, console.info);
+    const outputAssets = await server.getAssets({
+      ...Server.DEFAULT_BUNDLE_OPTIONS,
+      ...requestOpts,
+      bundleType: 'todo',
+    });
+    await saveAssets(outputAssets, 'android', assetsDest, undefined);
+  } finally {
+    await server.end();
+  }
+})().catch(error => {
+  console.error(error);
+  process.exit(1);
+});
+NODE
+    ) && write_color_output "Bundle generated: $bundle_output" "Green"
 }
 
 # =========================================================
@@ -718,6 +779,20 @@ main() {
             copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg" || true
         else
             write_color_output "APK build failed" "Red"
+            if [[ -f "$gen_dir/app.npk" ]]; then
+                write_color_output "Reusing existing app.npk and restoring nativeCodePackage" "Yellow"
+                if command -v jq >/dev/null 2>&1; then
+                    jq --arg path "/app.npk" '.nativeCodePackage = $path' "$gen_cfg" > "${gen_cfg}.tmp" && mv "${gen_cfg}.tmp" "$gen_cfg"
+                elif command -v python3 >/dev/null 2>&1; then
+                    python3 - <<PY
+import json
+p="$gen_cfg"
+cfg=json.load(open(p,encoding="utf-8-sig"))
+cfg["nativeCodePackage"]="/app.npk"
+open(p,"w",encoding="utf-8").write(json.dumps(cfg,indent=2,ensure_ascii=False))
+PY
+                fi
+            fi
         fi
     else
         write_color_output "Build conditions not met; skipping native build and reactPackages update" "Yellow"
