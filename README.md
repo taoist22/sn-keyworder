@@ -20,7 +20,7 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 
 ## Installation
 
-1. Download `Keyworder.snplg` from the [v1.3.1-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.3.1-beta).
+1. Download `Keyworder.snplg` from the [v1.3.2-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.3.2-beta).
 2. Connect your Supernote to your computer using the Supernote Partner app or Browse & Access.
 3. Copy `Keyworder.snplg` into the `MyStyle` folder on your device.
 4. On your Supernote, open a note, tap the **plugin icon** in the toolbar, go to **Manage Plugins**, tap **Add Plugin**, and select `Keyworder`.

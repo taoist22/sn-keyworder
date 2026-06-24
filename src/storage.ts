@@ -66,6 +66,7 @@ export async function saveKeywords(keywords: Keyword[]): Promise<void> {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(keywords));
   } catch (e) {
     console.error('[Storage] Save failed:', e);
+    throw e;
   }
 }
 

@@ -25,7 +25,9 @@ export default function App() {
     const reload = () =>
       loadKeywords()
         .then(kws => setKeywords(kws))
-        .catch(() => {});
+        .catch(error => {
+          console.error('[App] Failed to load keywords:', error);
+        });
 
     reload();
 
@@ -60,14 +62,17 @@ export default function App() {
   }, []);
 
   const updateKeywords = useCallback(async (kws: Keyword[]) => {
-    setKeywords(kws);
     await saveKeywords(kws);
+    setKeywords(kws);
   }, []);
 
-  const handleKeywordAdded = useCallback(async (kw: Keyword) => {
-    const updated = [...keywords, kw];
-    await updateKeywords(updated);
-  }, [keywords, updateKeywords]);
+  const handleKeywordAdded = useCallback(
+    async (kw: Keyword) => {
+      const updated = [...keywords, kw];
+      await updateKeywords(updated);
+    },
+    [keywords, updateKeywords],
+  );
 
   if (view === 'lasso-add') {
     return (
@@ -91,9 +96,6 @@ export default function App() {
   }
 
   return (
-    <KeywordPanel
-      keywords={keywords}
-      onManage={() => setView('config')}
-    />
+    <KeywordPanel keywords={keywords} onManage={() => setView('config')} />
   );
 }

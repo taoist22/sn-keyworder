@@ -14,6 +14,12 @@ import {
   PluginManager,
   PluginNoteAPI,
 } from 'sn-plugin-lib';
+import {
+  ApiRes,
+  getErrorMessage,
+  requireApiResult,
+  withTimeout,
+} from './apiSafety';
 import {Keyword, keywordValue} from './storage';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -25,11 +31,6 @@ const SECTION_HEADER_HEIGHT = 28;
 const ERROR_DISPLAY_MS = 2500;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-type ApiRes<T> =
-  | {success: boolean; result?: T; error?: {message?: string}}
-  | null
-  | undefined;
 
 type Props = {
   keywords: Keyword[];
@@ -52,6 +53,7 @@ const H_GAP = 40;
 const V_GAP = 24;
 const MIN_LABEL_BOX_WIDTH = LABEL_FONT_SIZE * 4;
 const KEY_FILTER_PREFIX = 'key:';
+const API_TIMEOUT_MS = 8000;
 
 type LayoutBox = {
   label: string;
@@ -140,30 +142,30 @@ function createKeywordLayout(
 }
 
 async function doInsertKeywords(labels: string[]): Promise<void> {
+  const pathRes = (await withTimeout(
+    PluginCommAPI.getCurrentFilePath(),
+    'Current file lookup',
+    API_TIMEOUT_MS,
+  )) as ApiRes<string>;
+  const filePath = requireApiResult(pathRes, 'Could not read current file');
+
+  const pageRes = (await withTimeout(
+    PluginCommAPI.getCurrentPageNum(),
+    'Current page lookup',
+    API_TIMEOUT_MS,
+  )) as ApiRes<number>;
+  const pageNum = requireApiResult(pageRes, 'Could not read current page');
+
   let pageWidth = DEFAULT_PAGE_WIDTH;
   let pageHeight = DEFAULT_PAGE_HEIGHT;
-  let filePath: string | undefined;
-  let pageNum: number | undefined;
-
-  try {
-    const pathRes =
-      (await PluginCommAPI.getCurrentFilePath()) as ApiRes<string>;
-    const pageRes = (await PluginCommAPI.getCurrentPageNum()) as ApiRes<number>;
-    if (pathRes?.success && pageRes?.success) {
-      filePath = pathRes.result as string;
-      pageNum = pageRes.result as number;
-      const sizeRes = (await PluginFileAPI.getPageSize(
-        filePath,
-        pageNum,
-      )) as ApiRes<{width: number; height: number}>;
-      if (sizeRes?.success && sizeRes.result) {
-        pageWidth = sizeRes.result.width;
-        pageHeight = sizeRes.result.height;
-      }
-    }
-  } catch {
-    // fall through to defaults
-  }
+  const sizeRes = (await withTimeout(
+    PluginFileAPI.getPageSize(filePath, pageNum),
+    'Page size lookup',
+    API_TIMEOUT_MS,
+  )) as ApiRes<{width: number; height: number}>;
+  const pageSize = requireApiResult(sizeRes, 'Could not read page size');
+  pageWidth = pageSize.width;
+  pageHeight = pageSize.height;
 
   const isNote = filePath?.toLowerCase().endsWith('.note') ?? true;
 
@@ -174,33 +176,35 @@ async function doInsertKeywords(labels: string[]): Promise<void> {
 
     if (isNote) {
       const textRect = {left, top, right, bottom};
-      const res = (await PluginNoteAPI.insertText({
-        textContentFull: label,
-        textRect,
-        fontSize: LABEL_FONT_SIZE,
-        textBold: 1,
-        textItalics: 0,
-        textAlign: 0,
-        textEditable: 1,
-        showLassoAfterInsert: false,
-      })) as ApiRes<boolean>;
+      const res = (await withTimeout(
+        PluginNoteAPI.insertText({
+          textContentFull: label,
+          textRect,
+          fontSize: LABEL_FONT_SIZE,
+          textBold: 1,
+          textItalics: 0,
+          textAlign: 0,
+          textEditable: 1,
+          showLassoAfterInsert: false,
+        }),
+        `Inserting "${label}"`,
+        API_TIMEOUT_MS,
+      )) as ApiRes<boolean>;
 
       if (!res?.success) {
-        throw new Error(res?.error?.message ?? 'insertText failed');
+        throw new Error(res?.error?.message ?? `Could not insert "${label}"`);
       }
     }
 
-    if (filePath !== undefined && pageNum !== undefined) {
-      const kwRes = (await PluginFileAPI.insertKeyWord(
-        filePath,
-        pageNum,
-        label,
-      )) as ApiRes<boolean>;
-      if (!kwRes?.success) {
-        throw new Error(
-          kwRes?.error?.message ?? `Keyword indexing failed for "${label}"`,
-        );
-      }
+    const kwRes = (await withTimeout(
+      PluginFileAPI.insertKeyWord(filePath, pageNum, label),
+      `Indexing "${label}"`,
+      API_TIMEOUT_MS,
+    )) as ApiRes<boolean>;
+    if (!kwRes?.success) {
+      throw new Error(
+        kwRes?.error?.message ?? `Keyword indexing failed for "${label}"`,
+      );
     }
   }
 }
@@ -319,8 +323,8 @@ export default function KeywordPanel({keywords, onManage}: Props) {
         .filter(Boolean);
       await doInsertKeywords(labels);
       PluginManager.closePluginView();
-    } catch (e) {
-      showError(e instanceof Error ? e.message : 'Insert failed');
+    } catch (caughtError) {
+      showError(getErrorMessage(caughtError, 'Insert failed'));
     } finally {
       setInserting(false);
     }

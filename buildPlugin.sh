@@ -19,6 +19,17 @@ write_color_output() {
     esac
 }
 
+is_strict_release_build() {
+    [[ "${KEYWORDER_RELEASE_BUILD:-0}" == "1" || "${RELEASE_BUILD:-0}" == "1" ]]
+}
+
+clean_release_outputs() {
+    local project_root="$1"
+    write_color_output "Strict release build: cleaning previous build outputs" "Blue"
+    rm -rf "$project_root/build/generated" "$project_root/build/outputs"
+    rm -rf "$project_root/android/app/build/outputs/apk" "$project_root/android/app/build/temp/apk-custom-debug"
+}
+
 # =========================================================
 # Function: test_operating_system
 # Purpose: Print current operating system information
@@ -736,6 +747,12 @@ main() {
     local project_root="${1:-$(pwd)}"
     get_package_info "$project_root"
 
+    local strict_release=0
+    if is_strict_release_build; then
+        strict_release=1
+        clean_release_outputs "$project_root"
+    fi
+
     local gen_dir
     gen_dir="$(ensure_build_generated_dir "$project_root")"
 
@@ -779,7 +796,10 @@ main() {
             copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg" || true
         else
             write_color_output "APK build failed" "Red"
-            if [[ -f "$gen_dir/app.npk" ]]; then
+            if [[ "$strict_release" -eq 1 ]]; then
+                write_color_output "Strict release build requires a fresh native package; aborting" "Red"
+                exit 1
+            elif [[ -f "$gen_dir/app.npk" ]]; then
                 write_color_output "Reusing existing app.npk and restoring nativeCodePackage" "Yellow"
                 if command -v jq >/dev/null 2>&1; then
                     jq --arg path "/app.npk" '.nativeCodePackage = $path' "$gen_cfg" > "${gen_cfg}.tmp" && mv "${gen_cfg}.tmp" "$gen_cfg"
@@ -796,6 +816,17 @@ PY
         fi
     else
         write_color_output "Build conditions not met; skipping native build and reactPackages update" "Yellow"
+    fi
+
+    if [[ "$strict_release" -eq 1 && "$should_build_native" -eq 0 ]]; then
+        if [[ ! -f "$gen_dir/app.npk" ]]; then
+            write_color_output "Strict release build missing app.npk; aborting" "Red"
+            exit 1
+        fi
+        if ! grep -q '"nativeCodePackage"[[:space:]]*:[[:space:]]*"/app.npk"' "$gen_cfg"; then
+            write_color_output "Strict release build missing nativeCodePackage=/app.npk; aborting" "Red"
+            exit 1
+        fi
     fi
 
     local outputs_dir

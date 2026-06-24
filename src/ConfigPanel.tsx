@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import {FileUtils} from 'sn-plugin-lib';
+import {getErrorMessage} from './apiSafety';
 import {Keyword, keywordSignature, makeId, normalizeKey} from './storage';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -82,6 +83,17 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
     };
   }, []);
 
+  const showImportMsg = useCallback((msg: string) => {
+    if (importMsgTimerRef.current) {
+      clearTimeout(importMsgTimerRef.current);
+    }
+    setImportMsg(msg);
+    importMsgTimerRef.current = setTimeout(
+      () => setImportMsg(null),
+      IMPORT_MSG_MS,
+    );
+  }, []);
+
   // Pinned first (in insertion order), then unpinned alphabetically
   const sorted = useMemo(() => {
     const pinned = keywords.filter(k => k.pinned);
@@ -96,9 +108,13 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
       const updated = keywords.map(k =>
         k.id === id ? {...k, pinned: !k.pinned} : k,
       );
-      await onUpdate(updated);
+      try {
+        await onUpdate(updated);
+      } catch (error) {
+        showImportMsg(getErrorMessage(error, 'Could not save pin change'));
+      }
     },
-    [keywords, onUpdate],
+    [keywords, onUpdate, showImportMsg],
   );
 
   const handleStartAdd = useCallback(() => {
@@ -124,12 +140,16 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
       setAddError(`"${key ? `${key}:${label}` : label}" already exists`);
       return;
     }
-    const updated = [...keywords, nextKeyword];
-    await onUpdate(updated);
-    setAdding(false);
-    setNewLabel('');
-    setNewKey('');
-    setAddError(null);
+    try {
+      const updated = [...keywords, nextKeyword];
+      await onUpdate(updated);
+      setAdding(false);
+      setNewLabel('');
+      setNewKey('');
+      setAddError(null);
+    } catch (error) {
+      setAddError(getErrorMessage(error, 'Could not save keyword'));
+    }
   }, [newLabel, newKey, keywords, onUpdate]);
 
   const handleCancelAdd = useCallback(() => {
@@ -145,20 +165,12 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
     }
     setImporting(true);
     setImportMsg(null);
-    if (importMsgTimerRef.current) {
-      clearTimeout(importMsgTimerRef.current);
-    }
-    const scheduleHide = (msg: string) => {
-      setImportMsg(msg);
-      importMsgTimerRef.current = setTimeout(
-        () => setImportMsg(null),
-        IMPORT_MSG_MS,
-      );
-    };
     try {
       try {
         await (FileUtils as any).makeDir(IMPORT_DIR);
-      } catch {}
+      } catch (error) {
+        console.warn('[ConfigPanel] Could not create import directory:', error);
+      }
       const response = await fetch(IMPORT_URL);
       if (!response.ok) {
         throw new Error('not_found');
@@ -180,32 +192,38 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
         keywords,
       );
       if (toAdd.length === 0) {
-        scheduleHide('No new keywords — all already in list');
+        showImportMsg('No new keywords — all already in list');
       } else {
         await onUpdate([...keywords, ...toAdd]);
-        scheduleHide(
+        showImportMsg(
           `Imported ${toAdd.length} keyword${toAdd.length !== 1 ? 's' : ''}`,
         );
       }
     } catch (e: any) {
       if (e?.message === 'invalid') {
-        scheduleHide('Invalid format — use strings or {label,key}');
-      } else {
-        scheduleHide(
+        showImportMsg('Invalid format — use strings or {label,key}');
+      } else if (e?.message === 'not_found') {
+        showImportMsg(
           'keywords.json not found — place it at MyStyle/SnKeyworder/',
         );
+      } else {
+        showImportMsg(getErrorMessage(e, 'Could not import keywords'));
       }
     } finally {
       setImporting(false);
     }
-  }, [importing, keywords, onUpdate]);
+  }, [importing, keywords, onUpdate, showImportMsg]);
 
   const handleDelete = useCallback(
     async (id: string) => {
       const updated = keywords.filter(k => k.id !== id);
-      await onUpdate(updated);
+      try {
+        await onUpdate(updated);
+      } catch (error) {
+        showImportMsg(getErrorMessage(error, 'Could not delete keyword'));
+      }
     },
-    [keywords, onUpdate],
+    [keywords, onUpdate, showImportMsg],
   );
 
   const renderItem = useCallback(

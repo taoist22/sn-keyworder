@@ -1,17 +1,17 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {
   PluginCommAPI,
   PluginFileAPI,
   PluginManager,
   PluginNoteAPI,
 } from 'sn-plugin-lib';
+import {
+  ApiRes,
+  getErrorMessage,
+  requireApiResult,
+  withTimeout,
+} from './apiSafety';
 import {Keyword, makeId} from './storage';
 
 const PANEL_WIDTH = 480;
@@ -28,77 +28,115 @@ type Phase =
   | {kind: 'ready'}
   | {kind: 'error'; msg: string};
 
-type ApiRes<T> =
-  | {success: boolean; result?: T; error?: {message?: string}}
-  | null
-  | undefined;
+const API_TIMEOUT_MS = 8000;
+const OCR_TIMEOUT_MS = 15000;
+const DEFAULT_PAGE_SIZE = {width: 1404, height: 1872};
+
+async function recycleElements(elements: any[]): Promise<void> {
+  for (const el of elements) {
+    try {
+      await el.recycle?.();
+    } catch (error) {
+      console.warn('[LassoAdd] recycle failed:', error);
+    }
+  }
+}
+
+function clearElementCache(): void {
+  try {
+    PluginCommAPI.clearElementCache();
+  } catch (error) {
+    console.warn('[LassoAdd] clearElementCache failed:', error);
+  }
+}
+
+async function getCurrentPageSize(): Promise<{width: number; height: number}> {
+  const pathRes = (await withTimeout(
+    PluginCommAPI.getCurrentFilePath(),
+    'Current file lookup',
+    API_TIMEOUT_MS,
+  )) as ApiRes<string>;
+  const filePath = requireApiResult(pathRes, 'Could not read current file');
+
+  const pageRes = (await withTimeout(
+    PluginCommAPI.getCurrentPageNum(),
+    'Current page lookup',
+    API_TIMEOUT_MS,
+  )) as ApiRes<number>;
+  const pageNum = requireApiResult(pageRes, 'Could not read current page');
+
+  const sizeRes = (await withTimeout(
+    PluginFileAPI.getPageSize(filePath, pageNum),
+    'Page size lookup',
+    API_TIMEOUT_MS,
+  )) as ApiRes<{width: number; height: number}>;
+
+  return requireApiResult(sizeRes, 'Could not read page size');
+}
 
 async function extractText(onStatus: (msg: string) => void): Promise<string> {
   // Typed text boxes: faster, no OCR needed
-  const lassoTextRes = (await PluginNoteAPI.getLassoText()) as ApiRes<
-    Array<{textContentFull: string}>
-  >;
-  if (lassoTextRes?.success && lassoTextRes.result?.length) {
-    const combined = lassoTextRes.result
-      .map(tb => tb.textContentFull?.trim())
-      .filter(Boolean)
-      .join(' ');
-    if (combined) {
-      return combined;
+  try {
+    const lassoTextRes = (await withTimeout(
+      PluginNoteAPI.getLassoText(),
+      'Reading selected typed text',
+      API_TIMEOUT_MS,
+    )) as ApiRes<Array<{textContentFull: string}>>;
+    if (lassoTextRes?.success && lassoTextRes.result?.length) {
+      const combined = lassoTextRes.result
+        .map(tb => tb.textContentFull?.trim())
+        .filter(Boolean)
+        .join(' ');
+      if (combined) {
+        return combined;
+      }
     }
+  } catch (error) {
+    console.warn('[LassoAdd] getLassoText failed, trying OCR:', error);
   }
 
   // Fall back to OCR on strokes
   onStatus('Recognizing handwriting…');
-  const elementsRes = (await PluginCommAPI.getLassoElements()) as ApiRes<any[]>;
+  const elementsRes = (await withTimeout(
+    PluginCommAPI.getLassoElements(),
+    'Reading selected handwriting',
+    API_TIMEOUT_MS,
+  )) as ApiRes<any[]>;
   if (!elementsRes?.success || !elementsRes.result?.length) {
     throw new Error('Nothing to recognize in selection');
   }
 
-  const strokes = elementsRes.result.filter((e: any) => e.type === 0);
-  if (strokes.length === 0) {
-    for (const el of elementsRes.result) {
-      try {
-        el.recycle?.();
-      } catch {}
+  const elements = elementsRes.result;
+  try {
+    const strokes = elements.filter((e: any) => e.type === 0);
+    if (strokes.length === 0) {
+      throw new Error('No strokes to recognize');
     }
-    throw new Error('No strokes to recognize');
-  }
 
-  // Get page size for recognition coordinate mapping
-  const pathRes = (await PluginCommAPI.getCurrentFilePath()) as ApiRes<string>;
-  const pageRes = (await PluginCommAPI.getCurrentPageNum()) as ApiRes<number>;
-  let pageSize = {width: 1404, height: 1872};
-  if (
-    pathRes?.success &&
-    pathRes.result &&
-    pageRes?.success &&
-    pageRes.result !== undefined
-  ) {
-    const sizeRes = (await PluginFileAPI.getPageSize(
-      pathRes.result,
-      pageRes.result,
-    )) as ApiRes<{width: number; height: number}>;
-    if (sizeRes?.success && sizeRes.result) {
-      pageSize = sizeRes.result;
-    }
-  }
-
-  const recogRes = (await PluginCommAPI.recognizeElements(
-    strokes,
-    pageSize,
-  )) as ApiRes<string>;
-
-  for (const el of elementsRes.result) {
+    let pageSize = DEFAULT_PAGE_SIZE;
     try {
-      await el.recycle?.();
-    } catch {}
-  }
+      pageSize = await getCurrentPageSize();
+    } catch (error) {
+      console.warn('[LassoAdd] page size lookup failed:', error);
+      throw new Error('Could not read page size for handwriting recognition');
+    }
 
-  if (!recogRes?.success || !recogRes.result?.trim()) {
-    throw new Error('Could not recognize handwriting');
+    const recogRes = (await withTimeout(
+      PluginCommAPI.recognizeElements(strokes, pageSize),
+      'Handwriting recognition',
+      OCR_TIMEOUT_MS,
+    )) as ApiRes<string>;
+
+    if (!recogRes?.success || !recogRes.result?.trim()) {
+      throw new Error(
+        recogRes?.error?.message ?? 'Could not recognize handwriting',
+      );
+    }
+    return recogRes.result.trim();
+  } finally {
+    await recycleElements(elements);
+    clearElementCache();
   }
-  return recogRes.result.trim();
 }
 
 export default function LassoAddPanel({keywords, onAdded, onDone}: Props) {
@@ -130,7 +168,10 @@ export default function LassoAddPanel({keywords, onAdded, onDone}: Props) {
         if (cancelled) {
           return;
         }
-        setPhase({kind: 'error', msg: err?.message ?? 'Could not read selection'});
+        setPhase({
+          kind: 'error',
+          msg: getErrorMessage(err, 'Could not read selection'),
+        });
         setTimeout(() => inputRef.current?.focus(), 100);
       });
     return () => {
@@ -154,17 +195,27 @@ export default function LassoAddPanel({keywords, onAdded, onDone}: Props) {
     setAddError(null);
     try {
       await onAdded({id: makeId(), label, pinned: false});
-      // Register with Supernote's native keyword index (best-effort)
-      try {
-        const pathRes = (await PluginCommAPI.getCurrentFilePath()) as ApiRes<string>;
-        const pageRes = (await PluginCommAPI.getCurrentPageNum()) as ApiRes<number>;
-        if (pathRes?.success && pathRes.result && pageRes?.success && pageRes.result !== undefined) {
-          await (PluginFileAPI.insertKeyWord(pathRes.result, pageRes.result, label) as any);
-        }
-      } catch {}
+      const pathRes = (await withTimeout(
+        PluginCommAPI.getCurrentFilePath(),
+        'Current file lookup',
+        API_TIMEOUT_MS,
+      )) as ApiRes<string>;
+      const filePath = requireApiResult(pathRes, 'Could not read current file');
+      const pageRes = (await withTimeout(
+        PluginCommAPI.getCurrentPageNum(),
+        'Current page lookup',
+        API_TIMEOUT_MS,
+      )) as ApiRes<number>;
+      const pageNum = requireApiResult(pageRes, 'Could not read current page');
+      const keywordRes = (await withTimeout(
+        PluginFileAPI.insertKeyWord(filePath, pageNum, label),
+        'Keyword indexing',
+        API_TIMEOUT_MS,
+      )) as ApiRes<boolean>;
+      requireApiResult(keywordRes, `Could not index "${label}"`);
       onDone();
-    } catch {
-      setAddError('Failed to save');
+    } catch (error) {
+      setAddError(getErrorMessage(error, 'Failed to save'));
     } finally {
       setAdding(false);
     }
@@ -182,13 +233,15 @@ export default function LassoAddPanel({keywords, onAdded, onDone}: Props) {
   return (
     <Pressable style={styles.overlay} onPress={handleClose}>
       <Pressable style={styles.panel} onPress={e => e.stopPropagation()}>
-
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>Add as Keyword</Text>
           <Pressable
             onPress={handleClose}
-            style={({pressed}) => [styles.closeBtn, pressed && styles.btnPressed]}>
+            style={({pressed}) => [
+              styles.closeBtn,
+              pressed && styles.btnPressed,
+            ]}>
             <Text style={styles.closeText}>{'✕'}</Text>
           </Pressable>
         </View>
@@ -234,7 +287,10 @@ export default function LassoAddPanel({keywords, onAdded, onDone}: Props) {
         <View style={styles.footer}>
           <Pressable
             onPress={handleClose}
-            style={({pressed}) => [styles.cancelBtn, pressed && styles.btnPressed]}>
+            style={({pressed}) => [
+              styles.cancelBtn,
+              pressed && styles.btnPressed,
+            ]}>
             <Text style={styles.cancelText}>Cancel</Text>
           </Pressable>
           <Pressable
@@ -251,7 +307,6 @@ export default function LassoAddPanel({keywords, onAdded, onDone}: Props) {
             </Text>
           </Pressable>
         </View>
-
       </Pressable>
     </Pressable>
   );
