@@ -6,6 +6,8 @@ import {
   PluginFileAPI,
   PluginManager,
   PluginNoteAPI,
+  type Point,
+  type Rect,
 } from 'sn-plugin-lib';
 import {
   ApiRes,
@@ -30,9 +32,35 @@ type Phase =
   | {kind: 'ready'}
   | {kind: 'error'; msg: string};
 
+class NoActiveLassoError extends Error {
+  constructor() {
+    super('No active lasso selection');
+  }
+}
+
 const API_TIMEOUT_MS = 8000;
 const OCR_TIMEOUT_MS = 15000;
+const RECOGNIZER_SETTLE_MS = 400;
 const DEFAULT_PAGE_SIZE = {width: 1404, height: 1872};
+const LASSO_RECT_MARGIN = 8;
+
+async function getCurrentFilePath(): Promise<string> {
+  const pathRes = (await withTimeout(
+    PluginCommAPI.getCurrentFilePath(),
+    'Current file lookup',
+    API_TIMEOUT_MS,
+  )) as ApiRes<string>;
+  return requireApiResult(pathRes, 'Could not read current file');
+}
+
+async function getCurrentPageNum(): Promise<number> {
+  const pageRes = (await withTimeout(
+    PluginCommAPI.getCurrentPageNum(),
+    'Current page lookup',
+    API_TIMEOUT_MS,
+  )) as ApiRes<number>;
+  return requireApiResult(pageRes, 'Could not read current page');
+}
 
 async function recycleElements(elements: any[]): Promise<void> {
   for (const el of elements) {
@@ -52,28 +80,109 @@ function clearElementCache(): void {
   }
 }
 
-async function getCurrentPageSize(): Promise<{width: number; height: number}> {
-  const pathRes = (await withTimeout(
-    PluginCommAPI.getCurrentFilePath(),
-    'Current file lookup',
-    API_TIMEOUT_MS,
-  )) as ApiRes<string>;
-  const filePath = requireApiResult(pathRes, 'Could not read current file');
+async function removeLassoBox(): Promise<void> {
+  try {
+    await withTimeout(
+      PluginCommAPI.setLassoBoxState(2),
+      'Clearing lasso selection',
+      API_TIMEOUT_MS,
+    );
+  } catch (error) {
+    console.warn('[LassoAdd] setLassoBoxState failed:', error);
+  }
+}
 
-  const pageRes = (await withTimeout(
-    PluginCommAPI.getCurrentPageNum(),
-    'Current page lookup',
+async function getCurrentLassoRect(): Promise<Rect> {
+  const rectRes = (await withTimeout(
+    PluginCommAPI.getLassoRect(),
+    'Current lasso lookup',
     API_TIMEOUT_MS,
-  )) as ApiRes<number>;
-  const pageNum = requireApiResult(pageRes, 'Could not read current page');
+  )) as unknown as ApiRes<Rect>;
+  const rect = requireApiResult(rectRes, 'Could not read lasso selection');
+  if (rect.right <= rect.left || rect.bottom <= rect.top) {
+    throw new Error('Lasso selection is empty');
+  }
+  return rect;
+}
+
+async function getCurrentPageSize(
+  pageNum?: number,
+): Promise<{width: number; height: number}> {
+  const filePath = await getCurrentFilePath();
+  const resolvedPageNum = pageNum ?? (await getCurrentPageNum());
 
   const sizeRes = (await withTimeout(
-    PluginFileAPI.getPageSize(filePath, pageNum),
+    PluginFileAPI.getPageSize(filePath, resolvedPageNum),
     'Page size lookup',
     API_TIMEOUT_MS,
   )) as ApiRes<{width: number; height: number}>;
 
   return requireApiResult(sizeRes, 'Could not read page size');
+}
+
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return (
+    a.left <= b.right + LASSO_RECT_MARGIN &&
+    a.right >= b.left - LASSO_RECT_MARGIN &&
+    a.top <= b.bottom + LASSO_RECT_MARGIN &&
+    a.bottom >= b.top - LASSO_RECT_MARGIN
+  );
+}
+
+async function getElementContourRect(element: any): Promise<Rect | null> {
+  const contours = element.contoursSrc;
+  if (!contours?.size || !contours?.getRange) {
+    return null;
+  }
+
+  const contourCount = await contours.size();
+  if (!contourCount) {
+    return null;
+  }
+
+  const contourGroups = (await contours.getRange(0, contourCount)) as Point[][];
+  const points = contourGroups.flat().filter(Boolean);
+  if (!points.length) {
+    return null;
+  }
+
+  return points.reduce(
+    (bounds, point) => ({
+      left: Math.min(bounds.left, point.x),
+      top: Math.min(bounds.top, point.y),
+      right: Math.max(bounds.right, point.x),
+      bottom: Math.max(bounds.bottom, point.y),
+    }),
+    {
+      left: Number.POSITIVE_INFINITY,
+      top: Number.POSITIVE_INFINITY,
+      right: Number.NEGATIVE_INFINITY,
+      bottom: Number.NEGATIVE_INFINITY,
+    },
+  );
+}
+
+async function getCurrentLassoStrokes(
+  elements: any[],
+  pageNum: number,
+  lassoRect: Rect,
+): Promise<any[]> {
+  const strokes: any[] = [];
+  for (const element of elements) {
+    if (element.type !== 0 || element.pageNum !== pageNum) {
+      continue;
+    }
+
+    try {
+      const elementRect = await getElementContourRect(element);
+      if (elementRect && rectsOverlap(elementRect, lassoRect)) {
+        strokes.push(element);
+      }
+    } catch (error) {
+      console.warn('[LassoAdd] contour lookup failed:', error);
+    }
+  }
+  return strokes;
 }
 
 async function extractDocSelectedText(): Promise<string> {
@@ -92,54 +201,56 @@ async function extractDocSelectedText(): Promise<string> {
   return selectedText;
 }
 
-async function extractLassoText(
+async function extractLassoOcr(
   onStatus: (msg: string) => void,
 ): Promise<string> {
-  // Typed text boxes: faster, no OCR needed
-  try {
-    const lassoTextRes = (await withTimeout(
-      PluginNoteAPI.getLassoText(),
-      'Reading selected typed text',
-      API_TIMEOUT_MS,
-    )) as ApiRes<Array<{textContentFull: string}>>;
-    if (lassoTextRes?.success && lassoTextRes.result?.length) {
-      const combined = lassoTextRes.result
-        .map(tb => tb.textContentFull?.trim())
-        .filter(Boolean)
-        .join(' ');
-      if (combined) {
-        return combined;
-      }
-    }
-  } catch (error) {
-    console.warn('[LassoAdd] getLassoText failed, trying OCR:', error);
-  }
-
-  // Fall back to OCR on strokes
   onStatus('Recognizing handwriting…');
+  const pageNum = await getCurrentPageNum();
+  const lassoRect = await getCurrentLassoRect();
+  clearElementCache();
   const elementsRes = (await withTimeout(
     PluginCommAPI.getLassoElements(),
     'Reading selected handwriting',
     API_TIMEOUT_MS,
   )) as ApiRes<any[]>;
   if (!elementsRes?.success || !elementsRes.result?.length) {
-    throw new Error('Nothing to recognize in selection');
+    throw new NoActiveLassoError();
   }
 
   const elements = elementsRes.result;
   try {
-    const strokes = elements.filter((e: any) => e.type === 0);
+    const strokes = await getCurrentLassoStrokes(elements, pageNum, lassoRect);
     if (strokes.length === 0) {
       throw new Error('No strokes to recognize');
     }
 
     let pageSize = DEFAULT_PAGE_SIZE;
     try {
-      pageSize = await getCurrentPageSize();
+      pageSize = await getCurrentPageSize(pageNum);
     } catch (error) {
       console.warn('[LassoAdd] page size lookup failed:', error);
       throw new Error('Could not read page size for handwriting recognition');
     }
+
+    // Flush the native recognizer's stroke buffer first. Without this, the
+    // recognizer accumulates strokes across successive recognitions (and across
+    // plugin sessions), so PDF lasso OCR returns stale prior words plus the new
+    // one plus gibberish. cancelRecognize resets it for a clean recognition.
+    try {
+      await withTimeout(
+        PluginCommAPI.cancelRecognize(),
+        'Reset recognizer',
+        API_TIMEOUT_MS,
+      );
+    } catch (error) {
+      console.warn('[LassoAdd] cancelRecognize failed:', error);
+    }
+
+    // The recognizer needs a moment to settle after cancel before it will
+    // accept a new recognition. Proven on-device: 0ms delay => intermittent
+    // "Recognition failed" (and document lock-up); 300-800ms => clean every
+    // time. 400ms gives a safety margin and is imperceptible behind the spinner.
+    await new Promise(resolve => setTimeout(resolve, RECOGNIZER_SETTLE_MS));
 
     const recogRes = (await withTimeout(
       PluginCommAPI.recognizeElements(strokes, pageSize),
@@ -156,6 +267,46 @@ async function extractLassoText(
   } finally {
     await recycleElements(elements);
     clearElementCache();
+    await removeLassoBox();
+  }
+}
+
+async function extractLassoText(
+  onStatus: (msg: string) => void,
+): Promise<string> {
+  const filePath = await getCurrentFilePath();
+  const isNote = filePath.toLowerCase().endsWith('.note');
+
+  // Typed text boxes: faster, no OCR needed
+  if (isNote) {
+    try {
+      const lassoTextRes = (await withTimeout(
+        PluginNoteAPI.getLassoText(),
+        'Reading selected typed text',
+        API_TIMEOUT_MS,
+      )) as ApiRes<Array<{textContentFull: string}>>;
+      if (lassoTextRes?.success && lassoTextRes.result?.length) {
+        const combined = lassoTextRes.result
+          .map(tb => tb.textContentFull?.trim())
+          .filter(Boolean)
+          .join(' ');
+        if (combined) {
+          return combined;
+        }
+      }
+    } catch (error) {
+      console.warn('[LassoAdd] getLassoText failed, trying OCR:', error);
+    }
+  }
+
+  // Fall back to OCR on strokes
+  try {
+    return await extractLassoOcr(onStatus);
+  } catch (error) {
+    if (error instanceof NoActiveLassoError) {
+      throw new Error('Nothing to recognize in selection');
+    }
+    throw error;
   }
 }
 
@@ -164,6 +315,7 @@ async function extractText(
   onStatus: (msg: string) => void,
 ): Promise<string> {
   if (source === 'doc-selection') {
+    onStatus('Reading selected document text…');
     return extractDocSelectedText();
   }
   return extractLassoText(onStatus);
@@ -186,6 +338,9 @@ export default function LassoAddPanel({
 
   useEffect(() => {
     let cancelled = false;
+    setText('');
+    setAddError(null);
+    setPhase({kind: 'loading', msg: 'Reading selection…'});
     extractText(source, msg => {
       if (!cancelled) {
         setPhase({kind: 'loading', msg});
@@ -230,18 +385,8 @@ export default function LassoAddPanel({
     setAddError(null);
     try {
       await onAdded({id: makeId(), label, pinned: false});
-      const pathRes = (await withTimeout(
-        PluginCommAPI.getCurrentFilePath(),
-        'Current file lookup',
-        API_TIMEOUT_MS,
-      )) as ApiRes<string>;
-      const filePath = requireApiResult(pathRes, 'Could not read current file');
-      const pageRes = (await withTimeout(
-        PluginCommAPI.getCurrentPageNum(),
-        'Current page lookup',
-        API_TIMEOUT_MS,
-      )) as ApiRes<number>;
-      const pageNum = requireApiResult(pageRes, 'Could not read current page');
+      const filePath = await getCurrentFilePath();
+      const pageNum = await getCurrentPageNum();
       const keywordRes = (await withTimeout(
         PluginFileAPI.insertKeyWord(filePath, pageNum, label),
         'Keyword indexing',
