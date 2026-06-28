@@ -2,6 +2,7 @@ import {PluginManager} from 'sn-plugin-lib';
 
 export const BUTTON_ID_TOOLBAR = 100;
 export const BUTTON_ID_LASSO = 200;
+export const BUTTON_ID_DOC_SELECTION = 300;
 
 export type ButtonEvent = {
   pressEvent: number;

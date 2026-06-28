@@ -9,7 +9,7 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 ## Features
 
 - **Multi-keyword insertion** — check any number of keywords and insert them all in one tap; each keyword lands as a separate, movable element in wrapped rows near the bottom of the page
-- **Lasso to add keyword** — lasso any handwritten or typed text, tap the Keyworder button in the lasso toolbar, and save it directly to your keyword list; works with OCR for handwriting
+- **Selection to add keyword** — lasso handwritten or typed text in notes, or select text in PDFs/EPUBs, then tap the Keyworder button and save it directly to your keyword list; works with OCR for handwriting
 - **Native index integration** — automatically adds each keyword to the device's built-in keyword index for page navigation
 - **In-plugin keyword management** — add, delete, and pin keywords directly from the plugin; changes persist automatically
 - **Bulk import** — use the **[Keyword Builder web tool](https://taoist22.github.io/sn-keyworder/keyword-tool.html)** to create a `keywords.json` file, then load the list onto the device
@@ -20,7 +20,7 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 
 ## Installation
 
-1. Download `Keyworder.snplg` from the [v1.3.2-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.3.2-beta).
+1. Download `Keyworder.snplg` from the [v1.3.3-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.3.3-beta).
 2. Connect your Supernote to your computer using the Supernote Partner app or Browse & Access.
 3. Copy `Keyworder.snplg` into the `MyStyle` folder on your device.
 4. On your Supernote, open a note, tap the **plugin icon** in the toolbar, go to **Manage Plugins**, tap **Add Plugin**, and select `Keyworder`.
@@ -77,12 +77,12 @@ You can import a large list of keywords at once by dropping a JSON file onto you
 
 > **Moving individual keywords:** Inserted keywords are separate text boxes, but Supernote's lasso selection area is not always tight to the visible word. When moving a single keyword, draw the lasso carefully around only that keyword; nearby keywords may be selected too if the boxes are close together.
 
-### Adding a keyword by lassoing text
+### Adding a keyword from selected text
 
-You can add a word or phrase to your keyword list directly from the page without opening the main panel:
+You can add a word or phrase to your keyword list directly from the page or document without opening the main panel:
 
-1. Use lasso to select handwritten strokes or a typed text box containing the text you want to save as a keyword.
-2. Tap the **Keyworder** button in the lasso toolbar. For handwriting, the plugin will recognise the text automatically.
+1. In a note, use lasso to select handwritten strokes or a typed text box containing the text you want to save as a keyword. In a PDF or EPUB, select document text.
+2. Tap the **Keyworder** button in the lasso or text-selection toolbar. For handwriting, the plugin will recognise the text automatically.
 3. Review or edit the pre-filled text in the **Add as Keyword** panel, then tap **Add**.
 4. The keyword is saved to your list and registered in the native keyword index for the current page. The plugin returns to the main keyword panel.
 

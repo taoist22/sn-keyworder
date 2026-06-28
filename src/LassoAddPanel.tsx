@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {
   PluginCommAPI,
+  PluginDocAPI,
   PluginFileAPI,
   PluginManager,
   PluginNoteAPI,
@@ -18,6 +19,7 @@ const PANEL_WIDTH = 480;
 const PANEL_PADDING = 20;
 
 type Props = {
+  source: 'lasso' | 'doc-selection';
   keywords: Keyword[];
   onAdded: (kw: Keyword) => Promise<void>;
   onDone: () => void;
@@ -74,7 +76,25 @@ async function getCurrentPageSize(): Promise<{width: number; height: number}> {
   return requireApiResult(sizeRes, 'Could not read page size');
 }
 
-async function extractText(onStatus: (msg: string) => void): Promise<string> {
+async function extractDocSelectedText(): Promise<string> {
+  const selectedTextRes = (await withTimeout(
+    PluginDocAPI.getLastSelectedText(),
+    'Reading selected document text',
+    API_TIMEOUT_MS,
+  )) as ApiRes<string>;
+  const selectedText = requireApiResult(
+    selectedTextRes,
+    'Could not read selected document text',
+  ).trim();
+  if (!selectedText) {
+    throw new Error('No selected document text');
+  }
+  return selectedText;
+}
+
+async function extractLassoText(
+  onStatus: (msg: string) => void,
+): Promise<string> {
   // Typed text boxes: faster, no OCR needed
   try {
     const lassoTextRes = (await withTimeout(
@@ -139,7 +159,22 @@ async function extractText(onStatus: (msg: string) => void): Promise<string> {
   }
 }
 
-export default function LassoAddPanel({keywords, onAdded, onDone}: Props) {
+async function extractText(
+  source: Props['source'],
+  onStatus: (msg: string) => void,
+): Promise<string> {
+  if (source === 'doc-selection') {
+    return extractDocSelectedText();
+  }
+  return extractLassoText(onStatus);
+}
+
+export default function LassoAddPanel({
+  source,
+  keywords,
+  onAdded,
+  onDone,
+}: Props) {
   const [phase, setPhase] = useState<Phase>({
     kind: 'loading',
     msg: 'Reading selection…',
@@ -151,7 +186,7 @@ export default function LassoAddPanel({keywords, onAdded, onDone}: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    extractText(msg => {
+    extractText(source, msg => {
       if (!cancelled) {
         setPhase({kind: 'loading', msg});
       }
@@ -177,7 +212,7 @@ export default function LassoAddPanel({keywords, onAdded, onDone}: Props) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [source]);
 
   const handleAdd = useCallback(async () => {
     const label = text.trim();

@@ -2,8 +2,8 @@
   "name": "Keyworder",
   "desc": "Stamp a keyword onto the current page and add it to the note's keyword index — one tap.",
   "iconPath": "assets/tag.png",
-  "versionName": "1.3.2-beta",
-  "versionCode": "10",
+  "versionName": "1.3.3-beta",
+  "versionCode": "11",
   "pluginID": "k9p3n8z2wq6m5xjr",
   "pluginKey": "Keyworder",
   "jsMainPath": "index"

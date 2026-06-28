@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {
   installPluginRouter,
+  BUTTON_ID_DOC_SELECTION,
   BUTTON_ID_TOOLBAR,
   BUTTON_ID_LASSO,
   consumeLastButtonEvent,
@@ -15,10 +16,12 @@ import {PluginManager} from 'sn-plugin-lib';
 installPluginRouter();
 
 type View = 'main' | 'config' | 'lasso-add';
+type AddSource = 'lasso' | 'doc-selection';
 
 export default function App() {
   const [view, setView] = useState<View>('main');
   const [lassoKey, setLassoKey] = useState(0);
+  const [addSource, setAddSource] = useState<AddSource>('lasso');
   const [keywords, setKeywords] = useState<Keyword[]>([]);
 
   useEffect(() => {
@@ -34,6 +37,11 @@ export default function App() {
     // Consume button pressed before this component mounted
     const pending = consumeLastButtonEvent();
     if (pending?.id === BUTTON_ID_LASSO) {
+      setAddSource('lasso');
+      setLassoKey(k => k + 1);
+      setView('lasso-add');
+    } else if (pending?.id === BUTTON_ID_DOC_SELECTION) {
+      setAddSource('doc-selection');
       setLassoKey(k => k + 1);
       setView('lasso-add');
     }
@@ -41,6 +49,11 @@ export default function App() {
     // Listen for buttons pressed while mounted
     const unsubscribe = subscribeToButtonEvents(event => {
       if (event.id === BUTTON_ID_LASSO) {
+        setAddSource('lasso');
+        setLassoKey(k => k + 1);
+        setView('lasso-add');
+      } else if (event.id === BUTTON_ID_DOC_SELECTION) {
+        setAddSource('doc-selection');
         setLassoKey(k => k + 1);
         setView('lasso-add');
       } else if (event.id === BUTTON_ID_TOOLBAR) {
@@ -78,6 +91,7 @@ export default function App() {
     return (
       <LassoAddPanel
         key={lassoKey}
+        source={addSource}
         keywords={keywords}
         onAdded={handleKeywordAdded}
         onDone={() => setView('main')}
