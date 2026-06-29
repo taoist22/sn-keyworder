@@ -1,22 +1,23 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
-  FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableWithoutFeedback,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {FileUtils} from 'sn-plugin-lib';
 import {getErrorMessage} from './apiSafety';
+import {getPanelMetrics} from './responsivePanel';
 import {Keyword, keywordSignature, makeId, normalizeKey} from './storage';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const PANEL_WIDTH = 480;
 const PANEL_PADDING = 20;
-const ITEM_HEIGHT = 64;
+const ITEM_HEIGHT = 60;
 
 const IMPORT_DIR = '/storage/emulated/0/MyStyle/SnKeyworder';
 const IMPORT_URL =
@@ -60,6 +61,11 @@ function parseImportItem(item: any): Pick<Keyword, 'label' | 'key'> | null {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
+  const windowSize = useWindowDimensions();
+  const panelMetrics = useMemo(
+    () => getPanelMetrics(windowSize.width, windowSize.height),
+    [windowSize.width, windowSize.height],
+  );
   const [adding, setAdding] = useState(false);
   const [newLabel, setNewLabel] = useState('');
   const [newKey, setNewKey] = useState('');
@@ -102,6 +108,33 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
       .sort((a, b) => a.label.localeCompare(b.label));
     return [...pinned, ...unpinned];
   }, [keywords]);
+  const [letterFilter, setLetterFilter] = useState<string | null>(null);
+
+  const activeLetters = useMemo(() => {
+    const letters: string[] = [];
+    for (const kw of sorted) {
+      const letter = (kw.label[0] ?? '#').toUpperCase();
+      if (!letters.includes(letter)) {
+        letters.push(letter);
+      }
+    }
+    return letters;
+  }, [sorted]);
+
+  useEffect(() => {
+    if (letterFilter != null && !activeLetters.includes(letterFilter)) {
+      setLetterFilter(null);
+    }
+  }, [activeLetters, letterFilter]);
+
+  const visibleSorted = useMemo(() => {
+    if (letterFilter == null) {
+      return sorted;
+    }
+    return sorted.filter(
+      kw => (kw.label[0] ?? '#').toUpperCase() === letterFilter,
+    );
+  }, [letterFilter, sorted]);
 
   const handleTogglePin = useCallback(
     async (id: string) => {
@@ -226,28 +259,19 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
     [keywords, onUpdate, showImportMsg],
   );
 
-  const renderItem = useCallback(
-    ({item}: {item: Keyword}) => (
-      <ConfigItem
-        kw={item}
-        onTogglePin={handleTogglePin}
-        onDelete={handleDelete}
-      />
-    ),
-    [handleTogglePin, handleDelete],
-  );
-
-  const keyExtractor = useCallback((item: Keyword) => item.id, []);
-
-  const ItemSeparator = useCallback(
-    () => <View style={styles.itemDivider} />,
-    [],
-  );
+  const handleJump = useCallback((letter: string) => {
+    setLetterFilter(prev => (prev === letter ? null : letter));
+  }, []);
 
   return (
     <TouchableWithoutFeedback onPress={onBack}>
       <View style={styles.overlay}>
-        <View style={styles.panel} onStartShouldSetResponder={() => true}>
+        <View
+          style={[
+            styles.panel,
+            {width: panelMetrics.width, height: panelMetrics.height},
+          ]}
+          onStartShouldSetResponder={() => true}>
           {/* ── Header ── */}
           <View style={styles.header}>
             <Pressable
@@ -365,26 +389,72 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
           )}
 
           {/* ── Keyword list ── */}
-          {sorted.length === 0 ? (
+          {visibleSorted.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>
-                {'No keywords yet.\nGo back and tap "+ Add".'}
+                {sorted.length === 0
+                  ? 'No keywords yet.\nGo back and tap "+ Add".'
+                  : 'No keywords for this letter.'}
               </Text>
             </View>
           ) : (
-            <FlatList
-              data={sorted}
-              renderItem={renderItem}
-              keyExtractor={keyExtractor}
-              ItemSeparatorComponent={ItemSeparator}
-              style={styles.list}
-              showsVerticalScrollIndicator={false}
-              getItemLayout={(_, index) => ({
-                length: ITEM_HEIGHT,
-                offset: ITEM_HEIGHT * index,
-                index,
-              })}
-            />
+            <View style={styles.listArea}>
+              <ScrollView
+                style={styles.list}
+                showsVerticalScrollIndicator={false}>
+                <View style={styles.keywordGrid}>
+                  {visibleSorted.map(item => (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.itemCell,
+                        panelMetrics.columns === 2 && styles.itemCellTwo,
+                      ]}>
+                      <ConfigItem
+                        kw={item}
+                        onTogglePin={handleTogglePin}
+                        onDelete={handleDelete}
+                      />
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+              <View style={styles.alphaRail}>
+                <Pressable
+                  onPress={() => setLetterFilter(null)}
+                  style={({pressed}) => [
+                    styles.alphaBtn,
+                    letterFilter == null && styles.alphaBtnActive,
+                    pressed && styles.btnPressed,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.alphaBtnText,
+                      letterFilter == null && styles.alphaBtnTextActive,
+                    ]}>
+                    All
+                  </Text>
+                </Pressable>
+                {activeLetters.map(letter => (
+                  <Pressable
+                    key={letter}
+                    onPress={() => handleJump(letter)}
+                    style={({pressed}) => [
+                      styles.alphaBtn,
+                      letterFilter === letter && styles.alphaBtnActive,
+                      pressed && styles.btnPressed,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.alphaBtnText,
+                        letterFilter === letter && styles.alphaBtnTextActive,
+                      ]}>
+                      {letter}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
           )}
         </View>
       </View>
@@ -439,10 +509,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   panel: {
-    width: PANEL_WIDTH,
-    height: 680,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 1.5,
     borderColor: '#000000',
   },
@@ -485,11 +553,6 @@ const styles = StyleSheet.create({
   lightDivider: {
     height: 1,
     backgroundColor: '#E8E8E8',
-  },
-  itemDivider: {
-    height: 1,
-    backgroundColor: '#E8E8E8',
-    marginHorizontal: PANEL_PADDING,
   },
 
   // Legend row
@@ -651,8 +714,54 @@ const styles = StyleSheet.create({
   },
 
   // List
+  listArea: {
+    flex: 1,
+    flexDirection: 'row',
+  },
   list: {
     flex: 1,
+  },
+  keywordGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  itemCell: {
+    width: '100%',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  itemCellTwo: {
+    width: '50%',
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  alphaRail: {
+    width: 30,
+    borderLeftWidth: 1,
+    borderLeftColor: '#E0E0E0',
+    paddingTop: 8,
+    paddingBottom: 8,
+    alignItems: 'center',
+  },
+  alphaBtn: {
+    width: 26,
+    minHeight: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 3,
+  },
+  alphaBtnActive: {
+    backgroundColor: '#000000',
+  },
+  alphaBtnText: {
+    fontSize: 11,
+    color: '#000000',
+    fontWeight: '700',
+  },
+  alphaBtnTextActive: {
+    color: '#FFFFFF',
   },
 
   // Item

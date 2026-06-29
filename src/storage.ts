@@ -12,11 +12,7 @@ const STORAGE_KEY = 'sn_keyworder_keywords';
 export function normalizeKey(
   key: string | undefined | null,
 ): string | undefined {
-  const cleaned = (key ?? '')
-    .trim()
-    .replace(/:+/g, '')
-    .replace(/\s+/g, '_')
-    .toLowerCase();
+  const cleaned = (key ?? '').trim().replace(/:+/g, '').replace(/\s+/g, '_');
   return cleaned.length > 0 ? cleaned : undefined;
 }
 

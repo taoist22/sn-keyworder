@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {
@@ -21,13 +22,12 @@ import {
   withTimeout,
 } from './apiSafety';
 import {Keyword, keywordValue} from './storage';
+import {getPanelMetrics} from './responsivePanel';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const PANEL_WIDTH = 480;
 const PANEL_PADDING = 20;
-const ITEM_HEIGHT = 60;
-const SECTION_HEADER_HEIGHT = 28;
+const ITEM_HEIGHT = 58;
 const ERROR_DISPLAY_MS = 2500;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -54,6 +54,12 @@ const V_GAP = 24;
 const MIN_LABEL_BOX_WIDTH = LABEL_FONT_SIZE * 4;
 const KEY_FILTER_PREFIX = 'key:';
 const API_TIMEOUT_MS = 8000;
+const DEVICE_NATIVE_PORTRAIT: Record<number, {width: number; height: number}> =
+  {
+    3: {width: 1404, height: 1872}, // A5X
+    4: {width: 1404, height: 1872}, // Nomad
+    5: {width: 1920, height: 2560}, // Manta
+  };
 
 type LayoutBox = {
   label: string;
@@ -62,6 +68,42 @@ type LayoutBox = {
   right: number;
   bottom: number;
 };
+
+function nativePlacementSizeFor(
+  pageWidth: number,
+  pageHeight: number,
+  deviceType: number | null,
+): {width: number; height: number} {
+  if (deviceType == null) {
+    return {width: pageWidth, height: pageHeight};
+  }
+  const native = DEVICE_NATIVE_PORTRAIT[deviceType];
+  if (!native) {
+    return {width: pageWidth, height: pageHeight};
+  }
+  const isLandscape = pageWidth > pageHeight;
+  const nativeWidth = isLandscape ? native.height : native.width;
+  const nativeHeight = isLandscape ? native.width : native.height;
+  return {
+    width: Math.min(pageWidth, nativeWidth),
+    height: Math.min(pageHeight, nativeHeight),
+  };
+}
+
+async function getDeviceTypeSafe(): Promise<number | null> {
+  try {
+    const deviceType = (await PluginManager.getDeviceType()) as unknown;
+    if (typeof deviceType === 'number') {
+      return deviceType;
+    }
+    if (typeof (deviceType as any)?.result === 'number') {
+      return (deviceType as any).result;
+    }
+  } catch {
+    // Fall back to page size if the device type bridge is unavailable.
+  }
+  return null;
+}
 
 function estimateLabelWidth(label: string): number {
   return Math.max(
@@ -166,10 +208,20 @@ async function doInsertKeywords(labels: string[]): Promise<void> {
   const pageSize = requireApiResult(sizeRes, 'Could not read page size');
   pageWidth = pageSize.width;
   pageHeight = pageSize.height;
+  const deviceType = await getDeviceTypeSafe();
+  const placementSize = nativePlacementSizeFor(
+    pageWidth,
+    pageHeight,
+    deviceType,
+  );
 
   const isNote = filePath?.toLowerCase().endsWith('.note') ?? true;
 
-  const boxes = createKeywordLayout(labels, pageWidth, pageHeight);
+  const boxes = createKeywordLayout(
+    labels,
+    placementSize.width,
+    placementSize.height,
+  );
 
   for (const box of boxes) {
     const {label, left, top, right, bottom} = box;
@@ -212,13 +264,17 @@ async function doInsertKeywords(labels: string[]): Promise<void> {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function KeywordPanel({keywords, onManage}: Props) {
+  const windowSize = useWindowDimensions();
+  const panelMetrics = useMemo(
+    () => getPanelMetrics(windowSize.width, windowSize.height),
+    [windowSize.width, windowSize.height],
+  );
   const [inserting, setInserting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
+  const [letterFilter, setLetterFilter] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scrollRef = useRef<ScrollView>(null);
-  const sectionYRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     return () => {
@@ -252,34 +308,54 @@ export default function KeywordPanel({keywords, onManage}: Props) {
     return keywords;
   }, [filter, keywords]);
 
-  const visibleIds = useMemo(
-    () => visibleKeywords.map(k => k.id),
-    [visibleKeywords],
-  );
-
-  // All keywords grouped by first letter, alphabetical
-  const sections = useMemo(() => {
+  const activeLetters = useMemo(() => {
+    const letters: string[] = [];
     const sorted = [...visibleKeywords].sort((a, b) =>
       a.label.localeCompare(b.label),
     );
-    const map = new Map<string, Keyword[]>();
     for (const kw of sorted) {
       const letter = (kw.label[0] ?? '#').toUpperCase();
-      if (!map.has(letter)) {
-        map.set(letter, []);
+      if (!letters.includes(letter)) {
+        letters.push(letter);
       }
-      map.get(letter)!.push(kw);
     }
-    return Array.from(map.entries()).map(([letter, items]) => ({
-      letter,
-      items,
-    }));
+    return letters;
   }, [visibleKeywords]);
 
-  const activeLetters = useMemo(
-    () => new Set(sections.map(s => s.letter)),
-    [sections],
+  useEffect(() => {
+    if (letterFilter != null && !activeLetters.includes(letterFilter)) {
+      setLetterFilter(null);
+    }
+  }, [activeLetters, letterFilter]);
+
+  const visibleKeywordsByLetter = useMemo(() => {
+    if (letterFilter == null) {
+      return visibleKeywords;
+    }
+    return visibleKeywords.filter(
+      kw => (kw.label[0] ?? '#').toUpperCase() === letterFilter,
+    );
+  }, [letterFilter, visibleKeywords]);
+
+  const visibleIds = useMemo(
+    () => visibleKeywordsByLetter.map(k => k.id),
+    [visibleKeywordsByLetter],
   );
+
+  const sortedVisibleKeywords = useMemo(() => {
+    return [...visibleKeywordsByLetter].sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  }, [visibleKeywordsByLetter]);
+
+  const pinnedByLetter = useMemo(() => {
+    if (letterFilter == null) {
+      return pinned;
+    }
+    return pinned.filter(
+      kw => (kw.label[0] ?? '#').toUpperCase() === letterFilter,
+    );
+  }, [letterFilter, pinned]);
 
   // ── Actions ──
 
@@ -337,10 +413,12 @@ export default function KeywordPanel({keywords, onManage}: Props) {
   }, [inserting]);
 
   const handleJump = useCallback((letter: string) => {
-    const y = sectionYRef.current[letter];
-    if (y !== undefined) {
-      scrollRef.current?.scrollTo({y, animated: false});
-    }
+    setLetterFilter(prev => (prev === letter ? null : letter));
+  }, []);
+
+  const handleFilterChange = useCallback((nextFilter: Filter) => {
+    setFilter(nextFilter);
+    setLetterFilter(null);
   }, []);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -352,6 +430,14 @@ export default function KeywordPanel({keywords, onManage}: Props) {
     filter !== 'all' &&
     visibleIds.length > 0 &&
     selectedVisibleCount < visibleIds.length;
+  const keywordColumns = panelMetrics.columns;
+  const panelStyle = useMemo(
+    () => [
+      styles.panel,
+      {width: panelMetrics.width, height: panelMetrics.height},
+    ],
+    [panelMetrics.height, panelMetrics.width],
+  );
 
   // ── Render ──
 
@@ -359,7 +445,7 @@ export default function KeywordPanel({keywords, onManage}: Props) {
     <Pressable style={styles.overlay} onPress={handleClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <Pressable style={styles.panel} onPress={e => e.stopPropagation()}>
+        <Pressable style={panelStyle} onPress={e => e.stopPropagation()}>
           {/* ── Header ── */}
           <View style={styles.header}>
             <Text style={styles.title}>Keyword Page</Text>
@@ -397,20 +483,17 @@ export default function KeywordPanel({keywords, onManage}: Props) {
 
           {/* ── Filter row ── */}
           <View style={styles.filterWrap}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.filterRow}>
+            <View style={styles.filterRow}>
               <FilterChip
                 label="All"
                 active={filter === 'all'}
-                onPress={() => setFilter('all')}
+                onPress={() => handleFilterChange('all')}
               />
               {pinned.length > 0 && (
                 <FilterChip
                   label="Pinned"
                   active={filter === 'pinned'}
-                  onPress={() => setFilter('pinned')}
+                  onPress={() => handleFilterChange('pinned')}
                 />
               )}
               {filterKeys.map(key => (
@@ -418,62 +501,49 @@ export default function KeywordPanel({keywords, onManage}: Props) {
                   key={key}
                   label={key}
                   active={filter === `${KEY_FILTER_PREFIX}${key}`}
-                  onPress={() => setFilter(`${KEY_FILTER_PREFIX}${key}`)}
+                  onPress={() =>
+                    handleFilterChange(`${KEY_FILTER_PREFIX}${key}`)
+                  }
                 />
               ))}
-            </ScrollView>
+            </View>
           </View>
           <View style={styles.divider} />
 
           {/* ── Pinned section ── */}
-          {filter === 'all' && pinned.length > 0 && (
+          {filter === 'all' && pinnedByLetter.length > 0 && (
             <>
               <View style={styles.sectionLabel}>
                 <Text style={styles.sectionLabelText}>PINNED</Text>
               </View>
               <ScrollView
                 style={styles.pinnedScroll}
-                scrollEnabled={pinned.length > 3}
+                scrollEnabled={pinnedByLetter.length > 3}
                 nestedScrollEnabled
                 showsVerticalScrollIndicator={false}>
-                {pinned.map((kw, idx) => (
-                  <React.Fragment key={kw.id}>
-                    {idx > 0 && <View style={styles.itemDivider} />}
-                    <KeywordItem
-                      kw={kw}
-                      selected={selectedSet.has(kw.id)}
-                      onToggleSelect={handleToggleSelect}
-                    />
-                  </React.Fragment>
-                ))}
+                <View style={styles.keywordGrid}>
+                  {pinnedByLetter.map(kw => (
+                    <View
+                      key={kw.id}
+                      style={[
+                        styles.keywordCell,
+                        keywordColumns === 2 && styles.keywordCellTwo,
+                      ]}>
+                      <KeywordItem
+                        kw={kw}
+                        selected={selectedSet.has(kw.id)}
+                        onToggleSelect={handleToggleSelect}
+                      />
+                    </View>
+                  ))}
+                </View>
               </ScrollView>
               <View style={styles.divider} />
             </>
           )}
 
-          {/* ── A-Z jump row (active letters only, full width) ── */}
-          {activeLetters.size > 0 && (
-            <View style={styles.jumpRow}>
-              {Array.from(activeLetters)
-                .sort()
-                .map(letter => (
-                  <Pressable
-                    key={letter}
-                    onPress={() => handleJump(letter)}
-                    style={({pressed}) => [
-                      styles.jumpBtn,
-                      pressed && styles.jumpBtnPressed,
-                    ]}>
-                    <Text style={styles.jumpBtnText}>{letter}</Text>
-                  </Pressable>
-                ))}
-            </View>
-          )}
-
-          <View style={styles.divider} />
-
-          {/* ── Full keyword list (scrollable, grouped by letter) ── */}
-          {sections.length === 0 ? (
+          {/* ── Full keyword list ── */}
+          {sortedVisibleKeywords.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>
                 {filter === 'all'
@@ -482,32 +552,72 @@ export default function KeywordPanel({keywords, onManage}: Props) {
               </Text>
             </View>
           ) : (
-            <ScrollView
-              ref={scrollRef}
-              style={styles.listScroll}
-              showsVerticalScrollIndicator={false}>
-              {sections.map(({letter, items}) => (
-                <View
-                  key={letter}
-                  onLayout={e => {
-                    sectionYRef.current[letter] = e.nativeEvent.layout.y;
-                  }}>
-                  <View style={styles.listSectionHeader}>
-                    <Text style={styles.listSectionHeaderText}>{letter}</Text>
-                  </View>
-                  {items.map((kw, idx) => (
-                    <React.Fragment key={kw.id}>
-                      {idx > 0 && <View style={styles.itemDivider} />}
+            <View style={styles.listArea}>
+              <ScrollView
+                style={styles.listScroll}
+                showsVerticalScrollIndicator={false}>
+                <View style={styles.sectionLabel}>
+                  <Text style={styles.sectionLabelText}>
+                    {letterFilter
+                      ? `${letterFilter} KEYWORDS`
+                      : filter === 'all'
+                      ? 'ALL KEYWORDS'
+                      : 'KEYWORDS'}
+                  </Text>
+                </View>
+                <View style={styles.keywordGrid}>
+                  {sortedVisibleKeywords.map(kw => (
+                    <View
+                      key={kw.id}
+                      style={[
+                        styles.keywordCell,
+                        keywordColumns === 2 && styles.keywordCellTwo,
+                      ]}>
                       <KeywordItem
                         kw={kw}
                         selected={selectedSet.has(kw.id)}
                         onToggleSelect={handleToggleSelect}
                       />
-                    </React.Fragment>
+                    </View>
                   ))}
                 </View>
-              ))}
-            </ScrollView>
+              </ScrollView>
+              <View style={styles.alphaRail}>
+                <Pressable
+                  onPress={() => setLetterFilter(null)}
+                  style={({pressed}) => [
+                    styles.alphaBtn,
+                    letterFilter == null && styles.alphaBtnActive,
+                    pressed && styles.alphaBtnPressed,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.alphaBtnText,
+                      letterFilter == null && styles.alphaBtnTextActive,
+                    ]}>
+                    All
+                  </Text>
+                </Pressable>
+                {activeLetters.map(letter => (
+                  <Pressable
+                    key={letter}
+                    onPress={() => handleJump(letter)}
+                    style={({pressed}) => [
+                      styles.alphaBtn,
+                      letterFilter === letter && styles.alphaBtnActive,
+                      pressed && styles.alphaBtnPressed,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.alphaBtnText,
+                        letterFilter === letter && styles.alphaBtnTextActive,
+                      ]}>
+                      {letter}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
           )}
 
           {/* ── Insert bar ── */}
@@ -633,10 +743,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   panel: {
-    width: PANEL_WIDTH,
-    height: 680,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 1.5,
     borderColor: '#000000',
   },
@@ -644,13 +752,13 @@ const styles = StyleSheet.create({
   // Header
   header: {
     paddingHorizontal: PANEL_PADDING,
-    paddingVertical: 16,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
   },
   title: {
     flex: 1,
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#000000',
   },
@@ -690,16 +798,10 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#000000',
   },
-  itemDivider: {
-    height: 1,
-    backgroundColor: '#E8E8E8',
-    marginHorizontal: PANEL_PADDING,
-  },
-
   // Subheader note
   subheader: {
     paddingHorizontal: PANEL_PADDING,
-    paddingVertical: 8,
+    paddingVertical: 6,
     backgroundColor: '#F8F8F8',
   },
   subheaderText: {
@@ -728,8 +830,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     paddingHorizontal: PANEL_PADDING,
-    paddingVertical: 8,
+    paddingVertical: 6,
     gap: 8,
   },
   filterChip: {
@@ -766,63 +870,78 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   pinnedScroll: {
-    maxHeight: 192,
-  },
-
-  // A-Z jump row (active letters only, full width)
-  jumpRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-evenly',
-    alignItems: 'center',
-    paddingHorizontal: PANEL_PADDING,
-    paddingVertical: 10,
-  },
-  jumpBtn: {
-    flex: 1,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 4,
-  },
-  jumpBtnPressed: {
-    backgroundColor: '#D0D0D0',
-  },
-  jumpBtnText: {
-    fontSize: 15,
-    color: '#000000',
-    fontWeight: '700',
+    maxHeight: 144,
   },
 
   // Full list
+  listArea: {
+    flex: 1,
+    flexDirection: 'row',
+  },
   listScroll: {
     flex: 1,
   },
-  listSectionHeader: {
-    height: SECTION_HEADER_HEIGHT,
-    backgroundColor: '#F0F0F0',
-    paddingHorizontal: PANEL_PADDING,
-    justifyContent: 'center',
+  keywordGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    paddingBottom: 8,
   },
-  listSectionHeaderText: {
-    fontSize: 13,
+  keywordCell: {
+    width: '100%',
+    paddingHorizontal: 3,
+    paddingVertical: 3,
+  },
+  keywordCellTwo: {
+    width: '50%',
+  },
+  alphaRail: {
+    width: 30,
+    borderLeftWidth: 1,
+    borderLeftColor: '#E0E0E0',
+    paddingTop: 8,
+    paddingBottom: 8,
+    alignItems: 'center',
+  },
+  alphaBtn: {
+    width: 26,
+    minHeight: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 3,
+  },
+  alphaBtnPressed: {
+    backgroundColor: '#E8E8E8',
+  },
+  alphaBtnActive: {
+    backgroundColor: '#000000',
+  },
+  alphaBtnText: {
+    fontSize: 11,
+    color: '#000000',
     fontWeight: '700',
-    color: '#555555',
-    letterSpacing: 0.5,
+  },
+  alphaBtnTextActive: {
+    color: '#FFFFFF',
   },
 
   // Keyword item (shared by pinned and list)
   item: {
     height: ITEM_HEIGHT,
-    paddingHorizontal: PANEL_PADDING,
+    paddingHorizontal: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 9,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
   },
   itemPressed: {
     backgroundColor: '#F0F0F0',
   },
   itemText: {
-    fontSize: 20,
+    fontSize: 16,
     color: '#000000',
     fontWeight: '500',
   },
@@ -830,8 +949,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   itemMeta: {
-    marginTop: 2,
-    fontSize: 12,
+    marginTop: 1,
+    fontSize: 10,
     color: '#777777',
     fontWeight: '600',
   },
@@ -863,8 +982,8 @@ const styles = StyleSheet.create({
 
   // Checkbox
   checkbox: {
-    width: 24,
-    height: 24,
+    width: 20,
+    height: 20,
     borderRadius: 4,
     borderWidth: 1.5,
     borderColor: '#AAAAAA',
@@ -876,10 +995,10 @@ const styles = StyleSheet.create({
     borderColor: '#000000',
   },
   checkmark: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#FFFFFF',
     fontWeight: 'bold',
-    lineHeight: 18,
+    lineHeight: 16,
   },
 
   // Insert bar

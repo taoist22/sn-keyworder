@@ -14,13 +14,14 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 - **In-plugin keyword management** — add, delete, and pin keywords directly from the plugin; changes persist automatically
 - **Bulk import** — use the **[Keyword Builder web tool](https://taoist22.github.io/sn-keyworder/keyword-tool.html)** to create a `keywords.json` file, then load the list onto the device
 - **Pinned keywords** — keep your most-used keywords at the top of the list for zero-scroll access
-- **Structured keywords** — optionally save a keyword with a short key so it inserts as `key:value` for tools such as sn-query
+- **Structured keywords** — optionally save a keyword with a short key so it inserts as `key:value` for tools such as sn-query; key capitalization is preserved for display and insertion
 - **Keyword views** — filter the picker by pinned keywords or by key, then select the filtered view when you want a batch
-- **A-Z jump row** — quickly navigate large keyword lists with alphabetical shortcuts
+- **Responsive Nomad and Manta layout** — larger, denser panels with compact two-column keyword lists on supported screen sizes
+- **A-Z letter rail** — filter the Keyword and Manage screens by first letter using the vertical rail on the right side of the list
 
 ## Installation
 
-1. Download `Keyworder.snplg` from the [v1.3.3-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.3.3-beta).
+1. Download `Keyworder.snplg` from the [v1.3.8-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.3.8-beta).
 2. Connect your Supernote to your computer using the Supernote Partner app or Browse & Access.
 3. Copy `Keyworder.snplg` into the `MyStyle` folder on your device.
 4. On your Supernote, open a note, tap the **plugin icon** in the toolbar, go to **Manage Plugins**, tap **Add Plugin**, and select `Keyworder`.
@@ -32,8 +33,10 @@ Keywords are managed entirely within the plugin — no external tools or file tr
 ### Adding a keyword
 
 1. Open Keyworder and tap **Manage** in the header.
-2. Tap **+ Add**, type your keyword, and optionally add a short key such as `course`, `topic`, or `status`. The add panel previews the saved value before you confirm.
+2. Tap **+ Add**, type your keyword, and optionally add a short key such as `course`, `topic`, `status`, or `ACC201`. The add panel previews the saved value before you confirm.
 3. The keyword is saved immediately and will be there the next time you open the plugin. If a key is present, Keyworder inserts it as `key:value`.
+
+Keys keep the capitalization you enter, so `ACC201` displays and inserts as `ACC201:keyword`. Duplicate checks are still case-insensitive.
 
 ### Pinning a keyword
 
@@ -67,13 +70,17 @@ You can import a large list of keywords at once by dropping a JSON file onto you
 3. Open Keyworder, tap **Manage**, then tap **Import**.
 4. New keywords are merged in — any matching `key:value` combination already in your list is skipped.
 
+The Manage screen includes the same right-side A-Z rail as the main keyword picker. Tap a letter to show only keywords beginning with that letter, or tap **All** at the top of the rail to return to the full list.
+
 ## Usage
 
 ### Inserting keywords onto a page
 
 1. Open a note and tap the **plugin icon** in the toolbar.
-2. Tap one or more keywords to check them. Use **All**, **Pinned**, or key filters to narrow the list. **Select Filter** appears only after you choose **Pinned** or a key filter.
+2. Tap one or more keywords to check them. Use **All**, **Pinned**, key filters, or the right-side A-Z rail to narrow the list. **Select Filter** appears only after you choose **Pinned** or a key filter.
 3. Tap **Insert**. Each keyword is stamped onto the page as a separate element in wrapped rows near the bottom — use lasso to move individual keywords to your desired locations. All inserted keywords are also added to the native keyword navigation index. Structured keywords are inserted and indexed as `key:value`, with no space after the colon.
+
+Keyworder adjusts the insert location for Nomad and Manta screen dimensions, including synced notes created on the other device, so visible text should remain on-page while still being indexed in the native keyword navigation pane.
 
 > **Moving individual keywords:** Inserted keywords are separate text boxes, but Supernote's lasso selection area is not always tight to the visible word. When moving a single keyword, draw the lasso carefully around only that keyword; nearby keywords may be selected too if the boxes are close together.
 
