@@ -12,7 +12,14 @@ import {
 import {FileUtils} from 'sn-plugin-lib';
 import {getErrorMessage} from './apiSafety';
 import {getPanelMetrics} from './responsivePanel';
-import {Keyword, keywordSignature, makeId, normalizeKey} from './storage';
+import {
+  Keyword,
+  KeywordGroup,
+  keywordSignature,
+  makeId,
+  normalizeGroups,
+  normalizeKey,
+} from './storage';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -28,7 +35,9 @@ const IMPORT_MSG_MS = 4000;
 
 type Props = {
   keywords: Keyword[];
+  groups: KeywordGroup[];
   onUpdate: (kws: Keyword[]) => Promise<void>;
+  onUpdateGroups: (groups: KeywordGroup[]) => Promise<void>;
   onBack: () => void;
 };
 
@@ -45,34 +54,56 @@ function uniqueKeywords(items: Keyword[], existingItems: Keyword[]): Keyword[] {
   return unique;
 }
 
-function parseImportItem(item: any): Pick<Keyword, 'label' | 'key'> | null {
+function parseImportItem(
+  item: any,
+): Pick<Keyword, 'label' | 'key' | 'groups'> | null {
   if (typeof item === 'string') {
     const label = item.trim();
-    return label ? {label} : null;
+    return label ? {label, groups: []} : null;
   }
 
   const label = typeof item?.label === 'string' ? item.label.trim() : '';
   if (!label) {
     return null;
   }
-  return {label, key: normalizeKey(item.key)};
+  return {
+    label,
+    key: normalizeKey(item.key),
+    groups: normalizeGroups([item.groups, item.group, item.key]),
+  };
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
+type ManageMode = 'keywords' | 'groups';
+
+export default function ConfigPanel({
+  keywords,
+  groups,
+  onUpdate,
+  onUpdateGroups,
+  onBack,
+}: Props) {
   const windowSize = useWindowDimensions();
   const panelMetrics = useMemo(
     () => getPanelMetrics(windowSize.width, windowSize.height),
     [windowSize.width, windowSize.height],
   );
   const [adding, setAdding] = useState(false);
+  const [mode, setMode] = useState<ManageMode>('keywords');
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState('');
   const [newKey, setNewKey] = useState('');
+  const [groupLetterFilter, setGroupLetterFilter] = useState<string | null>(
+    null,
+  );
+  const [showAllGroupKeywords, setShowAllGroupKeywords] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const importMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const normalizedNewKey = normalizeKey(newKey);
   const addPreview = newLabel.trim()
@@ -98,6 +129,14 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
       () => setImportMsg(null),
       IMPORT_MSG_MS,
     );
+  }, []);
+
+  const resetForm = useCallback(() => {
+    setAdding(false);
+    setEditingId(null);
+    setNewLabel('');
+    setNewKey('');
+    setAddError(null);
   }, []);
 
   // Pinned first (in insertion order), then unpinned alphabetically
@@ -136,6 +175,71 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
     );
   }, [letterFilter, sorted]);
 
+  const sortedGroupKeywords = useMemo(
+    () => [...keywords].sort((a, b) => a.label.localeCompare(b.label)),
+    [keywords],
+  );
+
+  const selectedGroup = useMemo(
+    () => groups.find(group => group.id === selectedGroupId) ?? null,
+    [groups, selectedGroupId],
+  );
+
+  const groupKeywordPool = useMemo(() => {
+    if (selectedGroup == null || showAllGroupKeywords) {
+      return sortedGroupKeywords;
+    }
+    return sortedGroupKeywords.filter(keyword =>
+      (keyword.groups ?? []).some(
+        groupName =>
+          groupName.toLowerCase() === selectedGroup.name.toLowerCase(),
+      ),
+    );
+  }, [selectedGroup, showAllGroupKeywords, sortedGroupKeywords]);
+
+  const activeGroupLetters = useMemo(() => {
+    const letters: string[] = [];
+    for (const kw of groupKeywordPool) {
+      const letter = (kw.label[0] ?? '#').toUpperCase();
+      if (!letters.includes(letter)) {
+        letters.push(letter);
+      }
+    }
+    return letters;
+  }, [groupKeywordPool]);
+
+  useEffect(() => {
+    if (
+      groupLetterFilter != null &&
+      !activeGroupLetters.includes(groupLetterFilter)
+    ) {
+      setGroupLetterFilter(null);
+    }
+  }, [activeGroupLetters, groupLetterFilter]);
+
+  const visibleGroupKeywords = useMemo(() => {
+    if (groupLetterFilter == null) {
+      return groupKeywordPool;
+    }
+    return groupKeywordPool.filter(
+      kw => (kw.label[0] ?? '#').toUpperCase() === groupLetterFilter,
+    );
+  }, [groupLetterFilter, groupKeywordPool]);
+
+  useEffect(() => {
+    if (
+      selectedGroupId &&
+      !groups.some(group => group.id === selectedGroupId)
+    ) {
+      setSelectedGroupId(null);
+    }
+  }, [groups, selectedGroupId]);
+
+  useEffect(() => {
+    setGroupLetterFilter(null);
+    setShowAllGroupKeywords(false);
+  }, [selectedGroupId]);
+
   const handleTogglePin = useCallback(
     async (id: string) => {
       const updated = keywords.map(k =>
@@ -152,45 +256,63 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
 
   const handleStartAdd = useCallback(() => {
     setAdding(true);
+    setEditingId(null);
     setNewLabel('');
     setNewKey('');
     setAddError(null);
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
 
-  const handleConfirmAdd = useCallback(async () => {
+  const handleStartEdit = useCallback((keyword: Keyword) => {
+    setAdding(true);
+    setEditingId(keyword.id);
+    setNewLabel(keyword.label);
+    setNewKey(keyword.key ?? '');
+    setAddError(null);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, []);
+
+  const handleConfirmSave = useCallback(async () => {
     const label = newLabel.trim();
     if (!label) {
-      setAdding(false);
+      resetForm();
       return;
     }
     const key = normalizeKey(newKey);
-    const nextKeyword = {id: makeId(), label, pinned: false, key};
-    const isDupe = keywords.some(
-      k => keywordSignature(k) === keywordSignature(nextKeyword),
+    const previousKeyword = editingId
+      ? keywords.find(k => k.id === editingId)
+      : null;
+    const keywordGroups = normalizeGroups(previousKeyword?.groups);
+    const nextKeyword = {
+      id: editingId ?? makeId(),
+      label,
+      pinned: previousKeyword?.pinned ?? false,
+      key,
+      groups: keywordGroups,
+    };
+    const existing = keywords.find(
+      k =>
+        k.id !== editingId &&
+        keywordSignature(k) === keywordSignature(nextKeyword),
     );
-    if (isDupe) {
+    if (existing) {
       setAddError(`"${key ? `${key}:${label}` : label}" already exists`);
       return;
     }
     try {
-      const updated = [...keywords, nextKeyword];
+      const updated = editingId
+        ? keywords.map(k => (k.id === editingId ? nextKeyword : k))
+        : [...keywords, nextKeyword];
       await onUpdate(updated);
-      setAdding(false);
-      setNewLabel('');
-      setNewKey('');
-      setAddError(null);
+      resetForm();
     } catch (error) {
       setAddError(getErrorMessage(error, 'Could not save keyword'));
     }
-  }, [newLabel, newKey, keywords, onUpdate]);
+  }, [newLabel, editingId, newKey, keywords, onUpdate, resetForm]);
 
   const handleCancelAdd = useCallback(() => {
-    setAdding(false);
-    setNewLabel('');
-    setNewKey('');
-    setAddError(null);
-  }, []);
+    resetForm();
+  }, [resetForm]);
 
   const handleImport = useCallback(async () => {
     if (importing) {
@@ -214,13 +336,14 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
       }
       const parsed = (data as any[])
         .map(parseImportItem)
-        .filter(Boolean) as Array<Pick<Keyword, 'label' | 'key'>>;
+        .filter(Boolean) as Array<Pick<Keyword, 'label' | 'key' | 'groups'>>;
       const toAdd = uniqueKeywords(
         parsed.map(item => ({
           id: makeId(),
           label: item.label,
           pinned: false,
           key: normalizeKey(item.key),
+          groups: normalizeGroups([item.groups, item.key]),
         })),
         keywords,
       );
@@ -259,8 +382,92 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
     [keywords, onUpdate, showImportMsg],
   );
 
+  const handleAddGroup = useCallback(async () => {
+    const name = normalizeKey(newGroupName);
+    if (!name) {
+      return;
+    }
+    if (groups.some(group => group.name.toLowerCase() === name.toLowerCase())) {
+      showImportMsg(`Group "${name}" already exists`);
+      return;
+    }
+    const nextGroups = [...groups, {id: makeId(), name}].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    try {
+      await onUpdateGroups(nextGroups);
+      setNewGroupName('');
+    } catch (error) {
+      showImportMsg(getErrorMessage(error, 'Could not save group'));
+    }
+  }, [groups, newGroupName, onUpdateGroups, showImportMsg]);
+
+  const handleDeleteGroup = useCallback(
+    async (group: KeywordGroup) => {
+      const nextGroups = groups.filter(item => item.id !== group.id);
+      const nextKeywords = keywords.map(keyword => ({
+        ...keyword,
+        groups: (keyword.groups ?? []).filter(
+          name => name.toLowerCase() !== group.name.toLowerCase(),
+        ),
+      }));
+      try {
+        await onUpdate(nextKeywords);
+        await onUpdateGroups(nextGroups);
+        if (selectedGroupId === group.id) {
+          setSelectedGroupId(null);
+        }
+      } catch (error) {
+        showImportMsg(getErrorMessage(error, 'Could not delete group'));
+      }
+    },
+    [
+      groups,
+      keywords,
+      onUpdate,
+      onUpdateGroups,
+      selectedGroupId,
+      showImportMsg,
+    ],
+  );
+
+  const handleToggleGroupKeyword = useCallback(
+    async (keywordId: string) => {
+      if (!selectedGroup) {
+        return;
+      }
+      const groupName = selectedGroup.name;
+      const nextKeywords = keywords.map(keyword => {
+        if (keyword.id !== keywordId) {
+          return keyword;
+        }
+        const hasGroup = (keyword.groups ?? []).some(
+          item => item.toLowerCase() === groupName.toLowerCase(),
+        );
+        return {
+          ...keyword,
+          groups: hasGroup
+            ? (keyword.groups ?? []).filter(
+                item => item.toLowerCase() !== groupName.toLowerCase(),
+              )
+            : normalizeGroups([keyword.groups, groupName]),
+        };
+      });
+      try {
+        await onUpdate(nextKeywords);
+      } catch (error) {
+        showImportMsg(getErrorMessage(error, 'Could not update group'));
+      }
+    },
+    [keywords, onUpdate, selectedGroup, showImportMsg],
+  );
+
   const handleJump = useCallback((letter: string) => {
     setLetterFilter(prev => (prev === letter ? null : letter));
+  }, []);
+
+  const handleGroupJump = useCallback((letter: string) => {
+    setGroupLetterFilter(prev => (prev === letter ? null : letter));
   }, []);
 
   return (
@@ -286,175 +493,398 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
           </View>
           <View style={styles.divider} />
 
-          {/* ── Legend + Add + Import buttons ── */}
-          <View style={styles.legendRow}>
-            <Text style={styles.legendText}>{'★ pin   ✕ delete'}</Text>
+          <View style={styles.modeTabs}>
             <Pressable
-              onPress={handleImport}
-              disabled={importing}
+              onPress={() => setMode('keywords')}
               style={({pressed}) => [
-                styles.importBtn,
+                styles.modeTab,
+                mode === 'keywords' && styles.modeTabActive,
                 pressed && styles.btnPressed,
-                importing && styles.btnDisabled,
               ]}>
-              <Text style={styles.importBtnText}>
-                {importing ? '…' : 'Import'}
+              <Text
+                style={[
+                  styles.modeTabText,
+                  mode === 'keywords' && styles.modeTabTextActive,
+                ]}>
+                Keywords
               </Text>
             </Pressable>
             <Pressable
-              onPress={handleStartAdd}
+              onPress={() => setMode('groups')}
               style={({pressed}) => [
-                styles.addBtn,
+                styles.modeTab,
+                mode === 'groups' && styles.modeTabActive,
                 pressed && styles.btnPressed,
               ]}>
-              <Text style={styles.addBtnText}>{'+ Add'}</Text>
+              <Text
+                style={[
+                  styles.modeTabText,
+                  mode === 'groups' && styles.modeTabTextActive,
+                ]}>
+                Groups
+              </Text>
             </Pressable>
           </View>
-          {importMsg != null && (
-            <View style={styles.importMsgBanner}>
-              <Text style={styles.importMsgText}>{importMsg}</Text>
-            </View>
-          )}
           <View style={styles.lightDivider} />
 
-          {/* ── Add input ── */}
-          {adding && (
+          {/* ── Legend + Add + Import buttons ── */}
+          {mode === 'keywords' ? (
             <>
-              <View style={styles.addRow}>
-                <View style={styles.addField}>
-                  <Text style={styles.inputLabel}>Keyword</Text>
-                  <TextInput
-                    ref={inputRef}
-                    style={styles.addInput}
-                    value={newLabel}
-                    onChangeText={text => {
-                      setNewLabel(text);
-                      setAddError(null);
-                    }}
-                    placeholder="New keyword"
-                    placeholderTextColor="#999"
-                    autoCapitalize="characters"
-                    returnKeyType="done"
-                    onSubmitEditing={handleConfirmAdd}
-                    maxLength={48}
-                  />
-                </View>
-                <View style={styles.keyField}>
-                  <Text style={styles.inputLabel}>Key</Text>
-                  <TextInput
-                    style={styles.keyInput}
-                    value={newKey}
-                    onChangeText={text => {
-                      setNewKey(text);
-                      setAddError(null);
-                    }}
-                    placeholder="optional"
-                    placeholderTextColor="#999"
-                    autoCapitalize="none"
-                    returnKeyType="done"
-                    onSubmitEditing={handleConfirmAdd}
-                    maxLength={20}
-                  />
-                </View>
+              <View style={styles.legendRow}>
+                <Text style={styles.legendText}>
+                  {'★ pin   Edit   ✕ delete'}
+                </Text>
                 <Pressable
-                  onPress={handleConfirmAdd}
+                  onPress={handleImport}
+                  disabled={importing}
                   style={({pressed}) => [
-                    styles.addConfirmBtn,
+                    styles.importBtn,
                     pressed && styles.btnPressed,
+                    importing && styles.btnDisabled,
                   ]}>
-                  <Text style={styles.addConfirmText}>{'✓'}</Text>
+                  <Text style={styles.importBtnText}>
+                    {importing ? '…' : 'Import'}
+                  </Text>
                 </Pressable>
-                <Pressable
-                  onPress={handleCancelAdd}
-                  style={({pressed}) => [
-                    styles.addCancelBtn,
-                    pressed && styles.btnPressed,
-                  ]}>
-                  <Text style={styles.addCancelText}>{'✕'}</Text>
-                </Pressable>
+                {!adding && (
+                  <Pressable
+                    onPress={handleStartAdd}
+                    style={({pressed}) => [
+                      styles.addBtn,
+                      pressed && styles.btnPressed,
+                    ]}>
+                    <Text style={styles.addBtnText}>+ Add</Text>
+                  </Pressable>
+                )}
               </View>
-              {addPreview !== '' && (
-                <View style={styles.previewRow}>
-                  <Text style={styles.previewLabel}>Saves as</Text>
-                  <Text style={styles.previewValue}>{addPreview}</Text>
-                </View>
-              )}
-              {addError != null && (
-                <View style={styles.addErrorBanner}>
-                  <Text style={styles.addErrorText}>{addError}</Text>
+              {importMsg != null && (
+                <View style={styles.importMsgBanner}>
+                  <Text style={styles.importMsgText}>{importMsg}</Text>
                 </View>
               )}
               <View style={styles.lightDivider} />
-            </>
-          )}
 
-          {/* ── Keyword list ── */}
-          {visibleSorted.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>
-                {sorted.length === 0
-                  ? 'No keywords yet.\nGo back and tap "+ Add".'
-                  : 'No keywords for this letter.'}
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.listArea}>
-              <ScrollView
-                style={styles.list}
-                showsVerticalScrollIndicator={false}>
-                <View style={styles.keywordGrid}>
-                  {visibleSorted.map(item => (
-                    <View
-                      key={item.id}
-                      style={[
-                        styles.itemCell,
-                        panelMetrics.columns === 2 && styles.itemCellTwo,
-                      ]}>
-                      <ConfigItem
-                        kw={item}
-                        onTogglePin={handleTogglePin}
-                        onDelete={handleDelete}
+              {/* ── Add input ── */}
+              {adding && (
+                <>
+                  <View style={styles.addRow}>
+                    <View style={styles.addField}>
+                      <Text style={styles.inputLabel}>Keyword</Text>
+                      <TextInput
+                        ref={inputRef}
+                        style={styles.addInput}
+                        value={newLabel}
+                        onChangeText={text => {
+                          setNewLabel(text);
+                          setAddError(null);
+                        }}
+                        placeholder="New keyword"
+                        placeholderTextColor="#999"
+                        autoCapitalize="characters"
+                        returnKeyType="done"
+                        onSubmitEditing={handleConfirmSave}
+                        maxLength={48}
                       />
                     </View>
-                  ))}
+                    <View style={styles.keyField}>
+                      <Text style={styles.inputLabel}>Structured Key</Text>
+                      <TextInput
+                        style={styles.keyInput}
+                        value={newKey}
+                        onChangeText={text => {
+                          setNewKey(text);
+                          setAddError(null);
+                        }}
+                        placeholder="optional"
+                        placeholderTextColor="#999"
+                        autoCapitalize="none"
+                        returnKeyType="done"
+                        onSubmitEditing={handleConfirmSave}
+                        maxLength={20}
+                      />
+                    </View>
+                    <Pressable
+                      onPress={handleConfirmSave}
+                      style={({pressed}) => [
+                        styles.addConfirmBtn,
+                        pressed && styles.btnPressed,
+                      ]}>
+                      <Text style={styles.addConfirmText}>{'✓'}</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={handleCancelAdd}
+                      style={({pressed}) => [
+                        styles.addCancelBtn,
+                        pressed && styles.btnPressed,
+                      ]}>
+                      <Text style={styles.addCancelText}>{'✕'}</Text>
+                    </Pressable>
+                  </View>
+                  {addPreview !== '' && (
+                    <View style={styles.previewRow}>
+                      <Text style={styles.previewLabel}>Inserts as</Text>
+                      <Text style={styles.previewValue}>{addPreview}</Text>
+                    </View>
+                  )}
+                  {addError != null && (
+                    <View style={styles.addErrorBanner}>
+                      <Text style={styles.addErrorText}>{addError}</Text>
+                    </View>
+                  )}
+                  <View style={styles.lightDivider} />
+                </>
+              )}
+
+              {/* ── Keyword list ── */}
+              {visibleSorted.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>
+                    {sorted.length === 0
+                      ? 'No keywords yet.\nGo back and tap "+ Add".'
+                      : 'No keywords for this letter.'}
+                  </Text>
                 </View>
-              </ScrollView>
-              <View style={styles.alphaRail}>
+              ) : (
+                <View style={styles.listArea}>
+                  <ScrollView
+                    style={styles.list}
+                    showsVerticalScrollIndicator={false}>
+                    <View style={styles.keywordGrid}>
+                      {visibleSorted.map(item => (
+                        <View
+                          key={item.id}
+                          style={[
+                            styles.itemCell,
+                            panelMetrics.columns === 2 && styles.itemCellTwo,
+                          ]}>
+                          <ConfigItem
+                            kw={item}
+                            onEdit={handleStartEdit}
+                            onTogglePin={handleTogglePin}
+                            onDelete={handleDelete}
+                          />
+                        </View>
+                      ))}
+                    </View>
+                  </ScrollView>
+                  <View style={styles.alphaRail}>
+                    <Pressable
+                      onPress={() => setLetterFilter(null)}
+                      style={({pressed}) => [
+                        styles.alphaBtn,
+                        letterFilter == null && styles.alphaBtnActive,
+                        pressed && styles.btnPressed,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.alphaBtnText,
+                          letterFilter == null && styles.alphaBtnTextActive,
+                        ]}>
+                        All
+                      </Text>
+                    </Pressable>
+                    {activeLetters.map(letter => (
+                      <Pressable
+                        key={letter}
+                        onPress={() => handleJump(letter)}
+                        style={({pressed}) => [
+                          styles.alphaBtn,
+                          letterFilter === letter && styles.alphaBtnActive,
+                          pressed && styles.btnPressed,
+                        ]}>
+                        <Text
+                          style={[
+                            styles.alphaBtnText,
+                            letterFilter === letter &&
+                              styles.alphaBtnTextActive,
+                          ]}>
+                          {letter}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </>
+          ) : (
+            <>
+              <View style={styles.groupCreateRow}>
+                <TextInput
+                  style={styles.groupCreateInput}
+                  value={newGroupName}
+                  onChangeText={setNewGroupName}
+                  placeholder="New group"
+                  placeholderTextColor="#999"
+                  autoCapitalize="none"
+                  returnKeyType="done"
+                  onSubmitEditing={handleAddGroup}
+                />
                 <Pressable
-                  onPress={() => setLetterFilter(null)}
+                  onPress={handleAddGroup}
                   style={({pressed}) => [
-                    styles.alphaBtn,
-                    letterFilter == null && styles.alphaBtnActive,
+                    styles.addBtn,
                     pressed && styles.btnPressed,
                   ]}>
-                  <Text
-                    style={[
-                      styles.alphaBtnText,
-                      letterFilter == null && styles.alphaBtnTextActive,
-                    ]}>
-                    All
-                  </Text>
+                  <Text style={styles.addBtnText}>+ Group</Text>
                 </Pressable>
-                {activeLetters.map(letter => (
-                  <Pressable
-                    key={letter}
-                    onPress={() => handleJump(letter)}
-                    style={({pressed}) => [
-                      styles.alphaBtn,
-                      letterFilter === letter && styles.alphaBtnActive,
-                      pressed && styles.btnPressed,
-                    ]}>
-                    <Text
-                      style={[
-                        styles.alphaBtnText,
-                        letterFilter === letter && styles.alphaBtnTextActive,
-                      ]}>
-                      {letter}
-                    </Text>
-                  </Pressable>
-                ))}
               </View>
-            </View>
+              {importMsg != null && (
+                <View style={styles.importMsgBanner}>
+                  <Text style={styles.importMsgText}>{importMsg}</Text>
+                </View>
+              )}
+              <View style={styles.lightDivider} />
+              <View style={styles.groupManageArea}>
+                <ScrollView
+                  style={styles.groupList}
+                  showsVerticalScrollIndicator={false}>
+                  {groups.length === 0 ? (
+                    <View style={styles.emptyState}>
+                      <Text style={styles.emptyText}>No groups yet.</Text>
+                    </View>
+                  ) : (
+                    groups.map(group => (
+                      <View key={group.id} style={styles.groupRowItem}>
+                        <Pressable
+                          onPress={() => setSelectedGroupId(group.id)}
+                          style={({pressed}) => [
+                            styles.groupSelectBtn,
+                            selectedGroupId === group.id &&
+                              styles.groupSelectBtnActive,
+                            pressed && styles.btnPressed,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.groupSelectText,
+                              selectedGroupId === group.id &&
+                                styles.groupSelectTextActive,
+                            ]}>
+                            {group.name}
+                          </Text>
+                          <Text style={styles.groupCountText}>
+                            {
+                              keywords.filter(keyword =>
+                                (keyword.groups ?? []).some(
+                                  name =>
+                                    name.toLowerCase() ===
+                                    group.name.toLowerCase(),
+                                ),
+                              ).length
+                            }
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => handleDeleteGroup(group)}
+                          style={({pressed}) => [
+                            styles.deleteBtn,
+                            pressed && styles.btnPressed,
+                          ]}>
+                          <Text style={styles.deleteBtnText}>{'✕'}</Text>
+                        </Pressable>
+                      </View>
+                    ))
+                  )}
+                </ScrollView>
+                <View style={styles.membershipPane}>
+                  <Text style={styles.membershipTitle}>
+                    {selectedGroup
+                      ? `${selectedGroup.name} ${
+                          showAllGroupKeywords ? 'all keywords' : 'members'
+                        }`
+                      : 'Select a group'}
+                  </Text>
+                  <View style={styles.membershipBody}>
+                    <ScrollView
+                      style={styles.memberList}
+                      showsVerticalScrollIndicator={false}>
+                      {selectedGroup == null ? (
+                        <Text style={styles.membershipHint}>
+                          Choose a group to add or remove keywords.
+                        </Text>
+                      ) : keywords.length === 0 ? (
+                        <Text style={styles.membershipHint}>
+                          Add keywords first, then assign them here.
+                        </Text>
+                      ) : (
+                        visibleGroupKeywords.map(keyword => {
+                          const checked = (keyword.groups ?? []).some(
+                            groupName =>
+                              groupName.toLowerCase() ===
+                              selectedGroup.name.toLowerCase(),
+                          );
+                          return (
+                            <Pressable
+                              key={keyword.id}
+                              onPress={() =>
+                                handleToggleGroupKeyword(keyword.id)
+                              }
+                              style={({pressed}) => [
+                                styles.memberRow,
+                                pressed && styles.btnPressed,
+                              ]}>
+                              <View
+                                style={[
+                                  styles.memberCheckbox,
+                                  checked && styles.memberCheckboxSelected,
+                                ]}>
+                                {checked && (
+                                  <Text style={styles.memberCheckmark}>✓</Text>
+                                )}
+                              </View>
+                              <Text style={styles.memberText} numberOfLines={1}>
+                                {keyword.label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })
+                      )}
+                    </ScrollView>
+                    {selectedGroup != null && keywords.length > 0 && (
+                      <View style={styles.alphaRail}>
+                        <Pressable
+                          onPress={() => {
+                            setShowAllGroupKeywords(prev => !prev);
+                            setGroupLetterFilter(null);
+                          }}
+                          style={({pressed}) => [
+                            styles.alphaBtn,
+                            showAllGroupKeywords && styles.alphaBtnActive,
+                            pressed && styles.btnPressed,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.alphaBtnText,
+                              showAllGroupKeywords && styles.alphaBtnTextActive,
+                            ]}>
+                            All
+                          </Text>
+                        </Pressable>
+                        {activeGroupLetters.map(letter => (
+                          <Pressable
+                            key={letter}
+                            onPress={() => handleGroupJump(letter)}
+                            style={({pressed}) => [
+                              styles.alphaBtn,
+                              groupLetterFilter === letter &&
+                                styles.alphaBtnActive,
+                              pressed && styles.btnPressed,
+                            ]}>
+                            <Text
+                              style={[
+                                styles.alphaBtnText,
+                                groupLetterFilter === letter &&
+                                  styles.alphaBtnTextActive,
+                              ]}>
+                              {letter}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </View>
+            </>
           )}
         </View>
       </View>
@@ -466,10 +896,12 @@ export default function ConfigPanel({keywords, onUpdate, onBack}: Props) {
 
 function ConfigItem({
   kw,
+  onEdit,
   onTogglePin,
   onDelete,
 }: {
   kw: Keyword;
+  onEdit: (keyword: Keyword) => void;
   onTogglePin: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
@@ -490,6 +922,25 @@ function ConfigItem({
           <Text style={styles.keyBadgeText}>{kw.key}</Text>
         </View>
       )}
+      {(kw.groups ?? []).length > 0 && (
+        <View style={styles.groupBadgeWrap}>
+          {(kw.groups ?? []).slice(0, 2).map(group => (
+            <View key={group} style={styles.groupBadge}>
+              <Text style={styles.groupBadgeText}>{group}</Text>
+            </View>
+          ))}
+          {(kw.groups ?? []).length > 2 && (
+            <Text style={styles.groupMoreText}>
+              +{(kw.groups ?? []).length - 2}
+            </Text>
+          )}
+        </View>
+      )}
+      <Pressable
+        onPress={() => onEdit(kw)}
+        style={({pressed}) => [styles.editBtn, pressed && styles.btnPressed]}>
+        <Text style={styles.editBtnText}>Edit</Text>
+      </Pressable>
       <Pressable
         onPress={() => onDelete(kw.id)}
         style={({pressed}) => [styles.deleteBtn, pressed && styles.btnPressed]}>
@@ -555,6 +1006,36 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8E8E8',
   },
 
+  // Mode tabs
+  modeTabs: {
+    flexDirection: 'row',
+    paddingHorizontal: PANEL_PADDING,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  modeTab: {
+    minWidth: 108,
+    height: 36,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#999999',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  modeTabActive: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  modeTabText: {
+    fontSize: 14,
+    color: '#555555',
+    fontWeight: '700',
+  },
+  modeTabTextActive: {
+    color: '#FFFFFF',
+  },
+
   // Legend row
   legendRow: {
     flexDirection: 'row',
@@ -609,6 +1090,134 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
 
+  // Group management
+  groupCreateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: PANEL_PADDING,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  groupCreateInput: {
+    flex: 1,
+    height: 42,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    color: '#000000',
+    backgroundColor: '#FFFFFF',
+  },
+  groupManageArea: {
+    flex: 1,
+    flexDirection: 'row',
+    minHeight: 0,
+  },
+  groupList: {
+    width: 220,
+    borderRightWidth: 1,
+    borderRightColor: '#E0E0E0',
+  },
+  groupRowItem: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: PANEL_PADDING,
+    paddingRight: 8,
+    gap: 8,
+  },
+  groupSelectBtn: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#CCCCCC',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  groupSelectBtnActive: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  groupSelectText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#000000',
+    fontWeight: '700',
+  },
+  groupSelectTextActive: {
+    color: '#FFFFFF',
+  },
+  groupCountText: {
+    minWidth: 24,
+    textAlign: 'center',
+    fontSize: 12,
+    color: '#777777',
+    fontWeight: '700',
+  },
+  membershipPane: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    minWidth: 0,
+  },
+  membershipTitle: {
+    marginBottom: 8,
+    fontSize: 16,
+    color: '#000000',
+    fontWeight: '700',
+  },
+  membershipHint: {
+    paddingTop: 20,
+    fontSize: 15,
+    color: '#777777',
+    lineHeight: 22,
+  },
+  membershipBody: {
+    flex: 1,
+    flexDirection: 'row',
+    minHeight: 0,
+  },
+  memberList: {
+    flex: 1,
+  },
+  memberRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  memberCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#777777',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberCheckboxSelected: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  memberCheckmark: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+  },
+  memberText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#000000',
+    fontWeight: '600',
+  },
+
   // Add input row
   addRow: {
     flexDirection: 'row',
@@ -643,6 +1252,21 @@ const styles = StyleSheet.create({
   },
   keyInput: {
     height: 44,
+    borderWidth: 1.5,
+    borderColor: '#777777',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    fontSize: 15,
+    color: '#000000',
+    backgroundColor: '#FFFFFF',
+  },
+  groupRow: {
+    paddingHorizontal: PANEL_PADDING,
+    paddingBottom: 8,
+    backgroundColor: '#F8F8F8',
+  },
+  groupInput: {
+    height: 42,
     borderWidth: 1.5,
     borderColor: '#777777',
     borderRadius: 6,
@@ -801,6 +1425,44 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   keyBadgeText: {
+    fontSize: 12,
+    color: '#555555',
+    fontWeight: '700',
+  },
+  groupBadgeWrap: {
+    maxWidth: 132,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  groupBadge: {
+    maxWidth: 58,
+    borderWidth: 1,
+    borderColor: '#BBBBBB',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  groupBadgeText: {
+    fontSize: 10,
+    color: '#666666',
+    fontWeight: '700',
+  },
+  groupMoreText: {
+    fontSize: 10,
+    color: '#777777',
+    fontWeight: '700',
+  },
+  editBtn: {
+    height: 34,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#BBBBBB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  editBtnText: {
     fontSize: 12,
     color: '#555555',
     fontWeight: '700',

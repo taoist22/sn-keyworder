@@ -21,7 +21,7 @@ import {
   requireApiResult,
   withTimeout,
 } from './apiSafety';
-import {Keyword, keywordValue} from './storage';
+import {Keyword, KeywordGroup, keywordValue} from './storage';
 import {getPanelMetrics} from './responsivePanel';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -34,10 +34,11 @@ const ERROR_DISPLAY_MS = 2500;
 
 type Props = {
   keywords: Keyword[];
+  groups: KeywordGroup[];
   onManage: () => void;
 };
 
-type Filter = 'all' | 'pinned' | `key:${string}`;
+type Filter = 'all' | 'pinned' | `group:${string}`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ const TOP_MARGIN = 80;
 const H_GAP = 40;
 const V_GAP = 24;
 const MIN_LABEL_BOX_WIDTH = LABEL_FONT_SIZE * 4;
-const KEY_FILTER_PREFIX = 'key:';
+const GROUP_FILTER_PREFIX = 'group:';
 const API_TIMEOUT_MS = 8000;
 const DEVICE_NATIVE_PORTRAIT: Record<number, {width: number; height: number}> =
   {
@@ -263,7 +264,7 @@ async function doInsertKeywords(labels: string[]): Promise<void> {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export default function KeywordPanel({keywords, onManage}: Props) {
+export default function KeywordPanel({keywords, groups, onManage}: Props) {
   const windowSize = useWindowDimensions();
   const panelMetrics = useMemo(
     () => getPanelMetrics(windowSize.width, windowSize.height),
@@ -287,23 +288,22 @@ export default function KeywordPanel({keywords, onManage}: Props) {
   // Pinned keywords in insertion order
   const pinned = useMemo(() => keywords.filter(k => k.pinned), [keywords]);
 
-  const filterKeys = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          keywords.map(k => k.key).filter((key): key is string => Boolean(key)),
-        ),
-      ).sort((a, b) => a.localeCompare(b)),
-    [keywords],
+  const groupFilters = useMemo(
+    () => groups.map(group => group.name).sort((a, b) => a.localeCompare(b)),
+    [groups],
   );
 
   const visibleKeywords = useMemo(() => {
     if (filter === 'pinned') {
       return keywords.filter(k => k.pinned);
     }
-    if (filter.startsWith(KEY_FILTER_PREFIX)) {
-      const key = filter.slice(KEY_FILTER_PREFIX.length);
-      return keywords.filter(k => k.key === key);
+    if (filter.startsWith(GROUP_FILTER_PREFIX)) {
+      const group = filter.slice(GROUP_FILTER_PREFIX.length);
+      return keywords.filter(k =>
+        (k.groups ?? []).some(
+          item => item.toLowerCase() === group.toLowerCase(),
+        ),
+      );
     }
     return keywords;
   }, [filter, keywords]);
@@ -496,13 +496,13 @@ export default function KeywordPanel({keywords, onManage}: Props) {
                   onPress={() => handleFilterChange('pinned')}
                 />
               )}
-              {filterKeys.map(key => (
+              {groupFilters.map(group => (
                 <FilterChip
-                  key={key}
-                  label={key}
-                  active={filter === `${KEY_FILTER_PREFIX}${key}`}
+                  key={group}
+                  label={group}
+                  active={filter === `${GROUP_FILTER_PREFIX}${group}`}
                   onPress={() =>
-                    handleFilterChange(`${KEY_FILTER_PREFIX}${key}`)
+                    handleFilterChange(`${GROUP_FILTER_PREFIX}${group}`)
                   }
                 />
               ))}
@@ -632,7 +632,9 @@ export default function KeywordPanel({keywords, onManage}: Props) {
                   pressed && styles.btnPressed,
                   !canSelectFilter && styles.toolBtnDisabled,
                 ]}>
-                <Text style={styles.toolBtnText}>Select Filter</Text>
+                <Text style={styles.toolBtnText}>
+                  {filter === 'pinned' ? 'Select Pinned' : 'Select Group'}
+                </Text>
               </Pressable>
             )}
             <Pressable
@@ -701,6 +703,11 @@ function KeywordItem({
         {kw.key != null && (
           <Text style={styles.itemMeta}>
             {kw.key}:{kw.label}
+          </Text>
+        )}
+        {(kw.groups ?? []).length > 0 && (
+          <Text style={styles.itemMeta} numberOfLines={1}>
+            {(kw.groups ?? []).join(', ')}
           </Text>
         )}
       </View>

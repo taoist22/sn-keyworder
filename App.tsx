@@ -10,7 +10,15 @@ import {
 import KeywordPanel from './src/KeywordPanel';
 import ConfigPanel from './src/ConfigPanel';
 import LassoAddPanel from './src/LassoAddPanel';
-import {Keyword, loadKeywords, saveKeywords} from './src/storage';
+import {
+  Keyword,
+  KeywordGroup,
+  loadKeywordGroups,
+  loadKeywords,
+  mergeGroupNames,
+  saveKeywordGroups,
+  saveKeywords,
+} from './src/storage';
 import {PluginManager} from 'sn-plugin-lib';
 
 installPluginRouter();
@@ -23,11 +31,15 @@ export default function App() {
   const [lassoKey, setLassoKey] = useState(0);
   const [addSource, setAddSource] = useState<AddSource>('lasso');
   const [keywords, setKeywords] = useState<Keyword[]>([]);
+  const [groups, setGroups] = useState<KeywordGroup[]>([]);
 
   useEffect(() => {
     const reload = () =>
-      loadKeywords()
-        .then(kws => setKeywords(kws))
+      Promise.all([loadKeywords(), loadKeywordGroups()])
+        .then(([kws, loadedGroups]) => {
+          setKeywords(kws);
+          setGroups(mergeGroupNames(loadedGroups, kws));
+        })
         .catch(error => {
           console.error('[App] Failed to load keywords:', error);
         });
@@ -77,7 +89,17 @@ export default function App() {
   const updateKeywords = useCallback(async (kws: Keyword[]) => {
     await saveKeywords(kws);
     setKeywords(kws);
+    setGroups(prev => mergeGroupNames(prev, kws));
   }, []);
+
+  const updateGroups = useCallback(
+    async (nextGroups: KeywordGroup[]) => {
+      const merged = mergeGroupNames(nextGroups, keywords);
+      await saveKeywordGroups(merged);
+      setGroups(merged);
+    },
+    [keywords],
+  );
 
   const handleKeywordAdded = useCallback(
     async (kw: Keyword) => {
@@ -103,13 +125,19 @@ export default function App() {
     return (
       <ConfigPanel
         keywords={keywords}
+        groups={groups}
         onUpdate={updateKeywords}
+        onUpdateGroups={updateGroups}
         onBack={() => setView('main')}
       />
     );
   }
 
   return (
-    <KeywordPanel keywords={keywords} onManage={() => setView('config')} />
+    <KeywordPanel
+      keywords={keywords}
+      groups={groups}
+      onManage={() => setView('config')}
+    />
   );
 }
