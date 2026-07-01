@@ -184,7 +184,11 @@ function createKeywordLayout(
   return boxes;
 }
 
-async function doInsertKeywords(labels: string[]): Promise<void> {
+type InsertResult = {
+  indexWarnings: string[];
+};
+
+async function doInsertKeywords(labels: string[]): Promise<InsertResult> {
   const pathRes = (await withTimeout(
     PluginCommAPI.getCurrentFilePath(),
     'Current file lookup',
@@ -223,6 +227,7 @@ async function doInsertKeywords(labels: string[]): Promise<void> {
     placementSize.width,
     placementSize.height,
   );
+  const indexWarnings: string[] = [];
 
   for (const box of boxes) {
     const {label, left, top, right, bottom} = box;
@@ -255,11 +260,16 @@ async function doInsertKeywords(labels: string[]): Promise<void> {
       API_TIMEOUT_MS,
     )) as ApiRes<boolean>;
     if (!kwRes?.success) {
-      throw new Error(
-        kwRes?.error?.message ?? `Keyword indexing failed for "${label}"`,
+      console.warn(
+        '[KeywordPanel] Keyword indexing skipped:',
+        label,
+        kwRes?.error?.message,
       );
+      indexWarnings.push(label);
     }
   }
+
+  return {indexWarnings};
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -397,8 +407,15 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
           return kw ? keywordValue(kw) : '';
         })
         .filter(Boolean);
-      await doInsertKeywords(labels);
-      PluginManager.closePluginView();
+      const result = await doInsertKeywords(labels);
+      setSelectedIds([]);
+      if (result.indexWarnings.length > 0) {
+        showError(
+          `Inserted, but already indexed: ${result.indexWarnings.join(', ')}`,
+        );
+      } else {
+        PluginManager.closePluginView();
+      }
     } catch (caughtError) {
       showError(getErrorMessage(caughtError, 'Insert failed'));
     } finally {
@@ -414,11 +431,13 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
 
   const handleJump = useCallback((letter: string) => {
     setLetterFilter(prev => (prev === letter ? null : letter));
+    setSelectedIds([]);
   }, []);
 
   const handleFilterChange = useCallback((nextFilter: Filter) => {
     setFilter(nextFilter);
     setLetterFilter(null);
+    setSelectedIds([]);
   }, []);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
