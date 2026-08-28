@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -23,6 +24,7 @@ import {
 } from './apiSafety';
 import {Keyword, KeywordGroup, keywordValue} from './storage';
 import {getPanelMetrics} from './responsivePanel';
+import {requireFileWritePermission} from './pluginPermissions';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -185,10 +187,14 @@ function createKeywordLayout(
 }
 
 type InsertResult = {
+  completedLabels: string[];
+  failedLabels: string[];
   indexWarnings: string[];
 };
 
 async function doInsertKeywords(labels: string[]): Promise<InsertResult> {
+  await requireFileWritePermission();
+
   const pathRes = (await withTimeout(
     PluginCommAPI.getCurrentFilePath(),
     'Current file lookup',
@@ -205,11 +211,23 @@ async function doInsertKeywords(labels: string[]): Promise<InsertResult> {
 
   let pageWidth = DEFAULT_PAGE_WIDTH;
   let pageHeight = DEFAULT_PAGE_HEIGHT;
-  const sizeRes = (await withTimeout(
-    PluginFileAPI.getPageSize(filePath, pageNum),
-    'Page size lookup',
-    API_TIMEOUT_MS,
-  )) as ApiRes<{width: number; height: number}>;
+  let sizeRes: ApiRes<{width: number; height: number}> | null = null;
+  try {
+    sizeRes = (await withTimeout(
+      PluginCommAPI.getPageDisplaySize(),
+      'Display size lookup',
+      API_TIMEOUT_MS,
+    )) as ApiRes<{width: number; height: number}>;
+  } catch {
+    // Older firmware does not expose display-size coordinates.
+  }
+  if (!sizeRes?.success) {
+    sizeRes = (await withTimeout(
+      PluginFileAPI.getPageSize(filePath, pageNum),
+      'Page size lookup',
+      API_TIMEOUT_MS,
+    )) as ApiRes<{width: number; height: number}>;
+  }
   const pageSize = requireApiResult(sizeRes, 'Could not read page size');
   pageWidth = pageSize.width;
   pageHeight = pageSize.height;
@@ -228,48 +246,58 @@ async function doInsertKeywords(labels: string[]): Promise<InsertResult> {
     placementSize.height,
   );
   const indexWarnings: string[] = [];
+  const completedLabels: string[] = [];
+  const failedLabels: string[] = [];
 
   for (const box of boxes) {
     const {label, left, top, right, bottom} = box;
+    try {
+      if (isNote) {
+        const textRect = {left, top, right, bottom};
+        const res = (await withTimeout(
+          PluginNoteAPI.insertText({
+            textContentFull: label,
+            textRect,
+            fontSize: LABEL_FONT_SIZE,
+            textBold: 1,
+            textItalics: 0,
+            textAlign: 0,
+            textEditable: 1,
+            showLassoAfterInsert: false,
+          }),
+          `Inserting "${label}"`,
+          API_TIMEOUT_MS,
+        )) as ApiRes<boolean>;
 
-    if (isNote) {
-      const textRect = {left, top, right, bottom};
-      const res = (await withTimeout(
-        PluginNoteAPI.insertText({
-          textContentFull: label,
-          textRect,
-          fontSize: LABEL_FONT_SIZE,
-          textBold: 1,
-          textItalics: 0,
-          textAlign: 0,
-          textEditable: 1,
-          showLassoAfterInsert: false,
-        }),
-        `Inserting "${label}"`,
+        if (!res?.success) {
+          throw new Error(res?.error?.message ?? `Could not insert "${label}"`);
+        }
+      }
+
+      const kwRes = (await withTimeout(
+        PluginFileAPI.insertKeyWord(filePath, pageNum, label),
+        `Indexing "${label}"`,
         API_TIMEOUT_MS,
       )) as ApiRes<boolean>;
-
-      if (!res?.success) {
-        throw new Error(res?.error?.message ?? `Could not insert "${label}"`);
+      if (!kwRes?.success) {
+        if (!isNote) {
+          throw new Error(kwRes?.error?.message ?? `Could not index "${label}"`);
+        }
+        console.warn(
+          '[KeywordPanel] Keyword indexing skipped:',
+          label,
+          kwRes?.error?.message,
+        );
+        indexWarnings.push(label);
       }
-    }
-
-    const kwRes = (await withTimeout(
-      PluginFileAPI.insertKeyWord(filePath, pageNum, label),
-      `Indexing "${label}"`,
-      API_TIMEOUT_MS,
-    )) as ApiRes<boolean>;
-    if (!kwRes?.success) {
-      console.warn(
-        '[KeywordPanel] Keyword indexing skipped:',
-        label,
-        kwRes?.error?.message,
-      );
-      indexWarnings.push(label);
+      completedLabels.push(label);
+    } catch (error) {
+      console.warn('[KeywordPanel] Keyword insertion failed:', label, error);
+      failedLabels.push(label);
     }
   }
 
-  return {indexWarnings};
+  return {completedLabels, failedLabels, indexWarnings};
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -408,10 +436,18 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
         })
         .filter(Boolean);
       const result = await doInsertKeywords(labels);
-      setSelectedIds([]);
-      if (result.indexWarnings.length > 0) {
+      const completed = new Set(result.completedLabels);
+      setSelectedIds(prev =>
+        prev.filter(id => {
+          const keyword = keywords.find(item => item.id === id);
+          return keyword == null || !completed.has(keywordValue(keyword));
+        }),
+      );
+      if (result.failedLabels.length > 0) {
+        showError(`Retry failed: ${result.failedLabels.join(', ')}`);
+      } else if (result.indexWarnings.length > 0) {
         showError(
-          `Inserted, but already indexed: ${result.indexWarnings.join(', ')}`,
+          `Inserted; index unchanged: ${result.indexWarnings.join(', ')}`,
         );
       } else {
         PluginManager.closePluginView();
@@ -486,13 +522,6 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
             </Pressable>
           </View>
           <View style={styles.divider} />
-          <View style={styles.subheader}>
-            <Text style={styles.subheaderText}>
-              Select keywords, then tap Insert
-            </Text>
-          </View>
-          <View style={styles.divider} />
-
           {/* ── Error banner ── */}
           {error != null && (
             <View style={styles.errorBanner}>
@@ -502,7 +531,10 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
 
           {/* ── Filter row ── */}
           <View style={styles.filterWrap}>
-            <View style={styles.filterRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRow}>
               <FilterChip
                 label="All"
                 active={filter === 'all'}
@@ -525,7 +557,7 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
                   }
                 />
               ))}
-            </View>
+            </ScrollView>
           </View>
           <View style={styles.divider} />
 
@@ -572,35 +604,42 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
             </View>
           ) : (
             <View style={styles.listArea}>
-              <ScrollView
+              <FlatList
+                key={`keywords-${keywordColumns}`}
                 style={styles.listScroll}
-                showsVerticalScrollIndicator={false}>
-                <View style={styles.sectionLabel}>
-                  <Text style={styles.sectionLabelText}>
-                    {letterFilter
-                      ? `${letterFilter} KEYWORDS`
-                      : filter === 'all'
-                      ? 'ALL KEYWORDS'
-                      : 'KEYWORDS'}
-                  </Text>
-                </View>
-                <View style={styles.keywordGrid}>
-                  {sortedVisibleKeywords.map(kw => (
-                    <View
-                      key={kw.id}
-                      style={[
-                        styles.keywordCell,
-                        keywordColumns === 2 && styles.keywordCellTwo,
-                      ]}>
-                      <KeywordItem
-                        kw={kw}
-                        selected={selectedSet.has(kw.id)}
-                        onToggleSelect={handleToggleSelect}
-                      />
-                    </View>
-                  ))}
-                </View>
-              </ScrollView>
+                data={sortedVisibleKeywords}
+                numColumns={keywordColumns}
+                keyExtractor={item => item.id}
+                showsVerticalScrollIndicator={false}
+                initialNumToRender={12}
+                maxToRenderPerBatch={12}
+                windowSize={7}
+                ListHeaderComponent={
+                  <View style={styles.sectionLabel}>
+                    <Text style={styles.sectionLabelText}>
+                      {letterFilter
+                        ? `${letterFilter} KEYWORDS`
+                        : filter === 'all'
+                        ? 'ALL KEYWORDS'
+                        : 'KEYWORDS'}
+                    </Text>
+                  </View>
+                }
+                contentContainerStyle={styles.keywordListContent}
+                renderItem={({item}) => (
+                  <View
+                    style={[
+                      styles.keywordCell,
+                      keywordColumns === 2 && styles.keywordCellTwo,
+                    ]}>
+                    <KeywordItem
+                      kw={item}
+                      selected={selectedSet.has(item.id)}
+                      onToggleSelect={handleToggleSelect}
+                    />
+                  </View>
+                )}
+              />
               <View style={styles.alphaRail}>
                 <Pressable
                   onPress={() => setLetterFilter(null)}
@@ -666,9 +705,6 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
               ]}>
               <Text style={styles.toolBtnText}>Clear</Text>
             </Pressable>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.insertBar}>
             <Text style={styles.selectHint}>
               {selectedIds.length === 0
                 ? 'None selected'
@@ -857,7 +893,6 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     paddingHorizontal: PANEL_PADDING,
     paddingVertical: 6,
     gap: 8,
@@ -910,6 +945,10 @@ const styles = StyleSheet.create({
   keywordGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
+  keywordListContent: {
     paddingHorizontal: 12,
     paddingBottom: 8,
   },
@@ -985,7 +1024,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: PANEL_PADDING,
-    paddingVertical: 8,
+    paddingVertical: 10,
     gap: 10,
   },
   toolBtn: {
@@ -1039,6 +1078,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     color: '#888888',
+    textAlign: 'right',
   },
   insertBtn: {
     paddingHorizontal: 24,

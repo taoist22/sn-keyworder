@@ -736,6 +736,53 @@ rename_to_snplg_file() {
 }
 
 # =========================================================
+# Function: validate_snplg_package
+# Purpose: Fail when a Keyworder package is stale or incomplete
+# Params: $1 .snplg path; $2 expected version
+# Returns: 0 on success, non-zero on validation failure
+# =========================================================
+validate_snplg_package() {
+    local snplg_path="$1"
+    local expected_version="$2"
+    python3 - "$snplg_path" "$expected_version" <<'PY'
+import json
+import sys
+import zipfile
+
+package_path, expected_version = sys.argv[1:3]
+required_files = {"Keyworder.bundle", "PluginConfig.json", "app.npk", "tag.png"}
+required_permissions = {
+    "plugin.permission.FILE:READ",
+    "plugin.permission.FILE:WRITE",
+}
+
+with zipfile.ZipFile(package_path) as archive:
+    names = set(archive.namelist())
+    missing = sorted(required_files - names)
+    if missing:
+        raise SystemExit(f"Package validation failed; missing: {', '.join(missing)}")
+    if archive.testzip() is not None:
+        raise SystemExit("Package validation failed; archive contains a corrupt entry")
+    config = json.loads(archive.read("PluginConfig.json"))
+
+if config.get("versionName") != expected_version:
+    raise SystemExit("Package validation failed; version does not match package.json")
+if config.get("nativeCodePackage") != "/app.npk":
+    raise SystemExit("Package validation failed; nativeCodePackage is missing")
+if "com.reactnativecommunity.asyncstorage.AsyncStoragePackage" not in config.get("reactPackages", []):
+    raise SystemExit("Package validation failed; AsyncStoragePackage is missing")
+permissions = set(config.get("uses-permissions", []))
+missing_permissions = sorted(required_permissions - permissions)
+if missing_permissions:
+    raise SystemExit(
+        f"Package validation failed; permissions missing: {', '.join(missing_permissions)}"
+    )
+
+print("Keyworder package validation passed")
+PY
+}
+
+# =========================================================
 # Function: main
 # Purpose: Orchestrate all steps to build plugin package
 # Params: $1 project root (optional, defaults to current directory)
@@ -793,38 +840,23 @@ main() {
         update_plugin_config_packages "$project_root" "$gen_dir" "$all_pkgs"
 
         if build_android_apk "$project_root" "$gen_cfg"; then
-            copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg" || true
+            copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg"
         else
             write_color_output "APK build failed" "Red"
-            if [[ "$strict_release" -eq 1 ]]; then
-                write_color_output "Strict release build requires a fresh native package; aborting" "Red"
-                exit 1
-            elif [[ -f "$gen_dir/app.npk" ]]; then
-                write_color_output "Reusing existing app.npk and restoring nativeCodePackage" "Yellow"
-                if command -v jq >/dev/null 2>&1; then
-                    jq --arg path "/app.npk" '.nativeCodePackage = $path' "$gen_cfg" > "${gen_cfg}.tmp" && mv "${gen_cfg}.tmp" "$gen_cfg"
-                elif command -v python3 >/dev/null 2>&1; then
-                    python3 - <<PY
-import json
-p="$gen_cfg"
-cfg=json.load(open(p,encoding="utf-8-sig"))
-cfg["nativeCodePackage"]="/app.npk"
-open(p,"w",encoding="utf-8").write(json.dumps(cfg,indent=2,ensure_ascii=False))
-PY
-                fi
-            fi
+            write_color_output "A fresh native package is required; aborting" "Red"
+            exit 1
         fi
     else
         write_color_output "Build conditions not met; skipping native build and reactPackages update" "Yellow"
     fi
 
-    if [[ "$strict_release" -eq 1 && "$should_build_native" -eq 0 ]]; then
+    if [[ "$should_build_native" -eq 0 ]]; then
         if [[ ! -f "$gen_dir/app.npk" ]]; then
-            write_color_output "Strict release build missing app.npk; aborting" "Red"
+            write_color_output "Build missing fresh app.npk; aborting" "Red"
             exit 1
         fi
         if ! grep -q '"nativeCodePackage"[[:space:]]*:[[:space:]]*"/app.npk"' "$gen_cfg"; then
-            write_color_output "Strict release build missing nativeCodePackage=/app.npk; aborting" "Red"
+            write_color_output "Build missing nativeCodePackage=/app.npk; aborting" "Red"
             exit 1
         fi
     fi
@@ -833,7 +865,9 @@ PY
     outputs_dir="$(ensure_build_outputs_directory "$project_root")"
     local zip_path="$outputs_dir/${PACKAGE_NAME}.zip"
     if new_zip_package "$gen_dir" "$zip_path"; then
-        rename_to_snplg_file "$zip_path" "$PACKAGE_NAME" >/dev/null
+        local snplg_path
+        snplg_path="$(rename_to_snplg_file "$zip_path" "$PACKAGE_NAME")"
+        validate_snplg_package "$snplg_path" "$PACKAGE_VERSION"
     fi
 
     write_color_output "Build process completed" "Blue"

@@ -73,16 +73,34 @@ export default function App() {
       }
     });
 
-    const lifeSub = PluginManager.addPluginLifeListener({
-      onStart: reload,
-      onStop() {
-        setView('main');
-      },
-    });
+    const manager = PluginManager as typeof PluginManager & {
+      addPluginLifeListener?: (listener: {
+        onStart: () => void;
+        onStop: () => void;
+      }) => {remove: () => void};
+    };
+    const lifeSub =
+      typeof manager.registerPluginLifeListener === 'function'
+        ? manager.registerPluginLifeListener({
+            onMsg(msg: any) {
+              const state = typeof msg === 'number' ? msg : msg?.state;
+              if (state === 2) {
+                reload();
+              } else if (state === 3) {
+                setView('main');
+              }
+            },
+          })
+        : manager.addPluginLifeListener?.({
+            onStart: reload,
+            onStop() {
+              setView('main');
+            },
+          });
 
     return () => {
       unsubscribe();
-      lifeSub.remove();
+      lifeSub?.remove();
     };
   }, []);
 
@@ -92,14 +110,12 @@ export default function App() {
     setGroups(prev => mergeGroupNames(prev, kws));
   }, []);
 
-  const updateGroups = useCallback(
-    async (nextGroups: KeywordGroup[]) => {
-      const merged = mergeGroupNames(nextGroups, keywords);
-      await saveKeywordGroups(merged);
-      setGroups(merged);
-    },
-    [keywords],
-  );
+  const updateGroups = useCallback(async (nextGroups: KeywordGroup[]) => {
+    // Callers already supply the complete group list. Re-merging against a
+    // stale render of keywords can resurrect a group immediately after delete.
+    await saveKeywordGroups(nextGroups);
+    setGroups(nextGroups);
+  }, []);
 
   const handleKeywordAdded = useCallback(
     async (kw: Keyword) => {

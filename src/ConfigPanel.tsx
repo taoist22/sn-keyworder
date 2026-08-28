@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  FlatList,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +13,7 @@ import {
 import {FileUtils} from 'sn-plugin-lib';
 import {getErrorMessage} from './apiSafety';
 import {getPanelMetrics} from './responsivePanel';
+import {requireFileReadPermission} from './pluginPermissions';
 import {
   Keyword,
   KeywordGroup,
@@ -76,6 +78,14 @@ function parseImportItem(
 // ─── Component ───────────────────────────────────────────────────────────────
 
 type ManageMode = 'keywords' | 'groups';
+type UndoAction =
+  | {kind: 'keyword'; item: Keyword; index: number}
+  | {
+      kind: 'group';
+      item: KeywordGroup;
+      index: number;
+      keywordsBefore: Keyword[];
+    };
 
 export default function ConfigPanel({
   keywords,
@@ -105,6 +115,8 @@ export default function ConfigPanel({
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const importMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [undoAction, setUndoAction] = useState<UndoAction | null>(null);
   const normalizedNewKey = normalizeKey(newKey);
   const addPreview = newLabel.trim()
     ? normalizedNewKey
@@ -117,7 +129,18 @@ export default function ConfigPanel({
       if (importMsgTimerRef.current) {
         clearTimeout(importMsgTimerRef.current);
       }
+      if (undoTimerRef.current) {
+        clearTimeout(undoTimerRef.current);
+      }
     };
+  }, []);
+
+  const offerUndo = useCallback((action: UndoAction) => {
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+    }
+    setUndoAction(action);
+    undoTimerRef.current = setTimeout(() => setUndoAction(null), IMPORT_MSG_MS);
   }, []);
 
   const showImportMsg = useCallback((msg: string) => {
@@ -184,6 +207,17 @@ export default function ConfigPanel({
     () => groups.find(group => group.id === selectedGroupId) ?? null,
     [groups, selectedGroupId],
   );
+
+  const groupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const keyword of keywords) {
+      for (const name of keyword.groups ?? []) {
+        const key = name.toLowerCase();
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [keywords]);
 
   const groupKeywordPool = useMemo(() => {
     if (selectedGroup == null || showAllGroupKeywords) {
@@ -321,6 +355,7 @@ export default function ConfigPanel({
     setImporting(true);
     setImportMsg(null);
     try {
+      await requireFileReadPermission();
       try {
         await (FileUtils as any).makeDir(IMPORT_DIR);
       } catch (error) {
@@ -372,14 +407,20 @@ export default function ConfigPanel({
 
   const handleDelete = useCallback(
     async (id: string) => {
+      const index = keywords.findIndex(k => k.id === id);
+      const deleted = keywords[index];
+      if (!deleted) {
+        return;
+      }
       const updated = keywords.filter(k => k.id !== id);
       try {
         await onUpdate(updated);
+        offerUndo({kind: 'keyword', item: deleted, index});
       } catch (error) {
         showImportMsg(getErrorMessage(error, 'Could not delete keyword'));
       }
     },
-    [keywords, onUpdate, showImportMsg],
+    [keywords, offerUndo, onUpdate, showImportMsg],
   );
 
   const handleAddGroup = useCallback(async () => {
@@ -404,6 +445,7 @@ export default function ConfigPanel({
 
   const handleDeleteGroup = useCallback(
     async (group: KeywordGroup) => {
+      const groupIndex = groups.findIndex(item => item.id === group.id);
       const nextGroups = groups.filter(item => item.id !== group.id);
       const nextKeywords = keywords.map(keyword => ({
         ...keyword,
@@ -414,6 +456,12 @@ export default function ConfigPanel({
       try {
         await onUpdate(nextKeywords);
         await onUpdateGroups(nextGroups);
+        offerUndo({
+          kind: 'group',
+          item: group,
+          index: groupIndex,
+          keywordsBefore: keywords,
+        });
         if (selectedGroupId === group.id) {
           setSelectedGroupId(null);
         }
@@ -426,10 +474,40 @@ export default function ConfigPanel({
       keywords,
       onUpdate,
       onUpdateGroups,
+      offerUndo,
       selectedGroupId,
       showImportMsg,
     ],
   );
+
+  const handleUndo = useCallback(async () => {
+    const action = undoAction;
+    if (!action) {
+      return;
+    }
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+    }
+    try {
+      if (action.kind === 'keyword') {
+        const restored = [...keywords];
+        restored.splice(Math.min(action.index, restored.length), 0, action.item);
+        await onUpdate(restored);
+      } else {
+        const restoredGroups = [...groups];
+        restoredGroups.splice(
+          Math.min(action.index, restoredGroups.length),
+          0,
+          action.item,
+        );
+        await onUpdate(action.keywordsBefore);
+        await onUpdateGroups(restoredGroups);
+      }
+      setUndoAction(null);
+    } catch (error) {
+      showImportMsg(getErrorMessage(error, 'Could not undo delete'));
+    }
+  }, [groups, keywords, onUpdate, onUpdateGroups, showImportMsg, undoAction]);
 
   const handleToggleGroupKeyword = useCallback(
     async (keywordId: string) => {
@@ -526,6 +604,20 @@ export default function ConfigPanel({
             </Pressable>
           </View>
           <View style={styles.lightDivider} />
+
+          {undoAction != null && (
+            <View style={styles.undoBanner}>
+              <Text style={styles.undoText} numberOfLines={1}>
+                Deleted{' '}
+                {undoAction.kind === 'group'
+                  ? undoAction.item.name
+                  : undoAction.item.label}
+              </Text>
+              <Pressable onPress={handleUndo} style={styles.undoBtn}>
+                <Text style={styles.undoBtnText}>Undo</Text>
+              </Pressable>
+            </View>
+          )}
 
           {/* ── Legend + Add + Import buttons ── */}
           {mode === 'keywords' ? (
@@ -646,27 +738,32 @@ export default function ConfigPanel({
                 </View>
               ) : (
                 <View style={styles.listArea}>
-                  <ScrollView
+                  <FlatList
+                    key={`manage-${panelMetrics.columns}`}
                     style={styles.list}
-                    showsVerticalScrollIndicator={false}>
-                    <View style={styles.keywordGrid}>
-                      {visibleSorted.map(item => (
-                        <View
-                          key={item.id}
-                          style={[
-                            styles.itemCell,
-                            panelMetrics.columns === 2 && styles.itemCellTwo,
-                          ]}>
-                          <ConfigItem
-                            kw={item}
-                            onEdit={handleStartEdit}
-                            onTogglePin={handleTogglePin}
-                            onDelete={handleDelete}
-                          />
-                        </View>
-                      ))}
-                    </View>
-                  </ScrollView>
+                    data={visibleSorted}
+                    numColumns={panelMetrics.columns}
+                    keyExtractor={item => item.id}
+                    contentContainerStyle={styles.keywordGrid}
+                    initialNumToRender={12}
+                    maxToRenderPerBatch={12}
+                    windowSize={7}
+                    showsVerticalScrollIndicator={false}
+                    renderItem={({item}) => (
+                      <View
+                        style={[
+                          styles.itemCell,
+                          panelMetrics.columns === 2 && styles.itemCellTwo,
+                        ]}>
+                        <ConfigItem
+                          kw={item}
+                          onEdit={handleStartEdit}
+                          onTogglePin={handleTogglePin}
+                          onDelete={handleDelete}
+                        />
+                      </View>
+                    )}
+                  />
                   <View style={styles.alphaRail}>
                     <Pressable
                       onPress={() => setLetterFilter(null)}
@@ -762,15 +859,7 @@ export default function ConfigPanel({
                             {group.name}
                           </Text>
                           <Text style={styles.groupCountText}>
-                            {
-                              keywords.filter(keyword =>
-                                (keyword.groups ?? []).some(
-                                  name =>
-                                    name.toLowerCase() ===
-                                    group.name.toLowerCase(),
-                                ),
-                              ).length
-                            }
+                            {groupCounts.get(group.name.toLowerCase()) ?? 0}
                           </Text>
                         </Pressable>
                         <Pressable
@@ -794,19 +883,24 @@ export default function ConfigPanel({
                       : 'Select a group'}
                   </Text>
                   <View style={styles.membershipBody}>
-                    <ScrollView
-                      style={styles.memberList}
-                      showsVerticalScrollIndicator={false}>
-                      {selectedGroup == null ? (
-                        <Text style={styles.membershipHint}>
-                          Choose a group to add or remove keywords.
-                        </Text>
-                      ) : keywords.length === 0 ? (
-                        <Text style={styles.membershipHint}>
-                          Add keywords first, then assign them here.
-                        </Text>
-                      ) : (
-                        visibleGroupKeywords.map(keyword => {
+                    {selectedGroup == null ? (
+                      <Text style={styles.membershipHint}>
+                        Choose a group to add or remove keywords.
+                      </Text>
+                    ) : keywords.length === 0 ? (
+                      <Text style={styles.membershipHint}>
+                        Add keywords first, then assign them here.
+                      </Text>
+                    ) : (
+                      <FlatList
+                        style={styles.memberList}
+                        data={visibleGroupKeywords}
+                        keyExtractor={keyword => keyword.id}
+                        initialNumToRender={16}
+                        maxToRenderPerBatch={16}
+                        windowSize={7}
+                        showsVerticalScrollIndicator={false}
+                        renderItem={({item: keyword}) => {
                           const checked = (keyword.groups ?? []).some(
                             groupName =>
                               groupName.toLowerCase() ===
@@ -836,9 +930,9 @@ export default function ConfigPanel({
                               </Text>
                             </Pressable>
                           );
-                        })
-                      )}
-                    </ScrollView>
+                        }}
+                      />
+                    )}
                     {selectedGroup != null && keywords.length > 0 && (
                       <View style={styles.alphaRail}>
                         <Pressable
@@ -1076,6 +1170,32 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     textAlign: 'center',
+  },
+  undoBanner: {
+    minHeight: 42,
+    paddingHorizontal: PANEL_PADDING,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#1A1A1A',
+  },
+  undoText: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  undoBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  undoBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   addBtn: {
     paddingHorizontal: 12,

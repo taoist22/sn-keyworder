@@ -1,5 +1,12 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import {
   PluginCommAPI,
   PluginDocAPI,
@@ -16,8 +23,8 @@ import {
   withTimeout,
 } from './apiSafety';
 import {Keyword, makeId} from './storage';
+import {requireFileWritePermission} from './pluginPermissions';
 
-const PANEL_WIDTH = 480;
 const PANEL_PADDING = 20;
 
 type Props = {
@@ -111,11 +118,23 @@ async function getCurrentPageSize(
   const filePath = await getCurrentFilePath();
   const resolvedPageNum = pageNum ?? (await getCurrentPageNum());
 
-  const sizeRes = (await withTimeout(
-    PluginFileAPI.getPageSize(filePath, resolvedPageNum),
-    'Page size lookup',
-    API_TIMEOUT_MS,
-  )) as ApiRes<{width: number; height: number}>;
+  let sizeRes: ApiRes<{width: number; height: number}> | null = null;
+  try {
+    sizeRes = (await withTimeout(
+      PluginCommAPI.getPageDisplaySize(),
+      'Display size lookup',
+      API_TIMEOUT_MS,
+    )) as ApiRes<{width: number; height: number}>;
+  } catch {
+    // Fall back for firmware predating getPageDisplaySize.
+  }
+  if (!sizeRes?.success) {
+    sizeRes = (await withTimeout(
+      PluginFileAPI.getPageSize(filePath, resolvedPageNum),
+      'Page size lookup',
+      API_TIMEOUT_MS,
+    )) as ApiRes<{width: number; height: number}>;
+  }
 
   return requireApiResult(sizeRes, 'Could not read page size');
 }
@@ -327,6 +346,8 @@ export default function LassoAddPanel({
   onAdded,
   onDone,
 }: Props) {
+  const windowSize = useWindowDimensions();
+  const panelWidth = Math.min(560, Math.max(320, windowSize.width - 48));
   const [phase, setPhase] = useState<Phase>({
     kind: 'loading',
     msg: 'Reading selection…',
@@ -384,7 +405,7 @@ export default function LassoAddPanel({
     setAdding(true);
     setAddError(null);
     try {
-      await onAdded({id: makeId(), label, pinned: false});
+      await requireFileWritePermission();
       const filePath = await getCurrentFilePath();
       const pageNum = await getCurrentPageNum();
       const keywordRes = (await withTimeout(
@@ -393,6 +414,9 @@ export default function LassoAddPanel({
         API_TIMEOUT_MS,
       )) as ApiRes<boolean>;
       requireApiResult(keywordRes, `Could not index "${label}"`);
+      // Persist only after native indexing succeeds so a failed index can be
+      // retried instead of leaving behind a local duplicate that blocks retry.
+      await onAdded({id: makeId(), label, pinned: false});
       onDone();
     } catch (error) {
       setAddError(getErrorMessage(error, 'Failed to save'));
@@ -412,7 +436,9 @@ export default function LassoAddPanel({
 
   return (
     <Pressable style={styles.overlay} onPress={handleClose}>
-      <Pressable style={styles.panel} onPress={e => e.stopPropagation()}>
+      <Pressable
+        style={[styles.panel, {width: panelWidth}]}
+        onPress={e => e.stopPropagation()}>
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>Add as Keyword</Text>
@@ -500,7 +526,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   panel: {
-    width: PANEL_WIDTH,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1.5,
