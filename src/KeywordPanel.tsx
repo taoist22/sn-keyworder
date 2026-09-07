@@ -24,7 +24,11 @@ import {
 } from './apiSafety';
 import {Keyword, KeywordGroup, keywordValue} from './storage';
 import {getPanelMetrics} from './responsivePanel';
-import {requireFileWritePermission} from './pluginPermissions';
+import {requireFileReadPermission, requireFileWritePermission} from './pluginPermissions';
+import DuplicatePrompt, {type DuplicateRequest, type DuplicateChoice} from './DuplicatePrompt';
+import PlacementOverlay, {type PlacementRequest, type PlacementResult} from './PlacementOverlay';
+import {createKeywordLayout, LABEL_FONT_SIZE} from './tapPlacement';
+import {subscribeToButtonEvents} from './pluginRouter';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -46,15 +50,6 @@ type Filter = 'all' | 'pinned' | `group:${string}`;
 
 const DEFAULT_PAGE_WIDTH = 1404;
 const DEFAULT_PAGE_HEIGHT = 1872;
-const LABEL_FONT_SIZE = 40;
-const LABEL_BOX_HEIGHT = 50;
-const BOTTOM_MARGIN = 160;
-const LEFT_MARGIN = 180;
-const RIGHT_MARGIN = 20;
-const TOP_MARGIN = 80;
-const H_GAP = 40;
-const V_GAP = 24;
-const MIN_LABEL_BOX_WIDTH = LABEL_FONT_SIZE * 4;
 const GROUP_FILTER_PREFIX = 'group:';
 const API_TIMEOUT_MS = 8000;
 const DEVICE_NATIVE_PORTRAIT: Record<number, {width: number; height: number}> =
@@ -63,14 +58,6 @@ const DEVICE_NATIVE_PORTRAIT: Record<number, {width: number; height: number}> =
     4: {width: 1404, height: 1872}, // Nomad
     5: {width: 1920, height: 2560}, // Manta
   };
-
-type LayoutBox = {
-  label: string;
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-};
 
 function nativePlacementSizeFor(
   pageWidth: number,
@@ -108,93 +95,13 @@ async function getDeviceTypeSafe(): Promise<number | null> {
   return null;
 }
 
-function estimateLabelWidth(label: string): number {
-  return Math.max(
-    MIN_LABEL_BOX_WIDTH,
-    Math.ceil(label.length * LABEL_FONT_SIZE * 0.8 * 1.15),
-  );
-}
-
-function createKeywordLayout(
-  labels: string[],
-  pageWidth: number,
-  pageHeight: number,
-): LayoutBox[] {
-  const maxRight = Math.max(
-    LEFT_MARGIN + MIN_LABEL_BOX_WIDTH,
-    pageWidth - RIGHT_MARGIN,
-  );
-  const maxWidth = Math.max(MIN_LABEL_BOX_WIDTH, maxRight - LEFT_MARGIN);
-  const rows: Array<Array<{label: string; width: number}>> = [];
-  let currentRow: Array<{label: string; width: number}> = [];
-  let currentWidth = 0;
-
-  for (const label of labels) {
-    const width = Math.min(estimateLabelWidth(label), maxWidth);
-    const nextWidth =
-      currentRow.length === 0 ? width : currentWidth + H_GAP + width;
-
-    if (currentRow.length > 0 && nextWidth > maxWidth) {
-      rows.push(currentRow);
-      currentRow = [{label, width}];
-      currentWidth = width;
-    } else {
-      currentRow.push({label, width});
-      currentWidth = nextWidth;
-    }
-  }
-
-  if (currentRow.length > 0) {
-    rows.push(currentRow);
-  }
-
-  const firstBottom = pageHeight - BOTTOM_MARGIN;
-  const availableHeight = Math.max(LABEL_BOX_HEIGHT, firstBottom - TOP_MARGIN);
-  const naturalRowsHeight =
-    rows.length * LABEL_BOX_HEIGHT + Math.max(0, rows.length - 1) * V_GAP;
-  const rowGap =
-    rows.length > 1 && naturalRowsHeight > availableHeight
-      ? Math.max(
-          8,
-          Math.floor(
-            (availableHeight - rows.length * LABEL_BOX_HEIGHT) /
-              (rows.length - 1),
-          ),
-        )
-      : V_GAP;
-  const rowStride = LABEL_BOX_HEIGHT + rowGap;
-  const boxes: LayoutBox[] = [];
-
-  rows.forEach((row, rowIndex) => {
-    const bottom = firstBottom - rowIndex * rowStride;
-    const top = bottom - LABEL_BOX_HEIGHT;
-    let left = LEFT_MARGIN;
-
-    row.forEach(item => {
-      const right = Math.min(maxRight, left + item.width);
-      boxes.push({
-        label: item.label,
-        left,
-        top,
-        right,
-        bottom: top + LABEL_BOX_HEIGHT,
-      });
-      left = right + H_GAP;
-    });
-  });
-
-  return boxes;
-}
-
 type InsertResult = {
   completedLabels: string[];
   failedLabels: string[];
   indexWarnings: string[];
 };
 
-async function doInsertKeywords(labels: string[]): Promise<InsertResult> {
-  await requireFileWritePermission();
-
+async function resolvePageContext() {
   const pathRes = (await withTimeout(
     PluginCommAPI.getCurrentFilePath(),
     'Current file lookup',
@@ -238,13 +145,17 @@ async function doInsertKeywords(labels: string[]): Promise<InsertResult> {
     deviceType,
   );
 
-  const isNote = filePath?.toLowerCase().endsWith('.note') ?? true;
+  return {filePath, pageNum, ...placementSize};
+}
 
-  const boxes = createKeywordLayout(
-    labels,
-    placementSize.width,
-    placementSize.height,
-  );
+type PageContext = Awaited<ReturnType<typeof resolvePageContext>>;
+async function doInsertKeywords(
+  labels: string[], context: PageContext, point: {x: number; y: number}, indexed: Set<string>,
+): Promise<InsertResult> {
+  const {filePath, pageNum, width, height} = context;
+  const isNote = filePath.toLowerCase().endsWith('.note');
+  const boxes = isNote ? createKeywordLayout(labels, width, height, point)
+    : labels.map(label => ({label, left: 0, top: 0, right: 0, bottom: 0}));
   const indexWarnings: string[] = [];
   const completedLabels: string[] = [];
   const failedLabels: string[] = [];
@@ -274,6 +185,10 @@ async function doInsertKeywords(labels: string[]): Promise<InsertResult> {
         }
       }
 
+      if (indexed.has(label)) {
+        completedLabels.push(label);
+        continue;
+      }
       const kwRes = (await withTimeout(
         PluginFileAPI.insertKeyWord(filePath, pageNum, label),
         `Indexing "${label}"`,
@@ -290,6 +205,7 @@ async function doInsertKeywords(labels: string[]): Promise<InsertResult> {
         );
         indexWarnings.push(label);
       }
+      if (kwRes?.success) {indexed.add(label);}
       completedLabels.push(label);
     } catch (error) {
       console.warn('[KeywordPanel] Keyword insertion failed:', label, error);
@@ -309,6 +225,16 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
     [windowSize.width, windowSize.height],
   );
   const [inserting, setInserting] = useState(false);
+  const insertingRef = useRef(false);
+  const mounted = useRef(true);
+  const [hidden, setHidden] = useState(false);
+  const [duplicates, setDuplicates] = useState<DuplicateRequest | null>(null);
+  const [placement, setPlacement] = useState<PlacementRequest | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    const unsubscribe = subscribeToButtonEvents(() => setHidden(false));
+    return () => {mounted.current = false; unsubscribe();};
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
@@ -423,19 +349,67 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
   }, []);
 
   const handleInsertSelected = useCallback(async () => {
-    if (inserting || selectedIds.length === 0) {
+    if (insertingRef.current || selectedIds.length === 0) {
       return;
     }
+    insertingRef.current = true;
     setInserting(true);
     setError(null);
     try {
-      const labels = selectedIds
+      let labels = selectedIds
         .map(id => {
           const kw = keywords.find(k => k.id === id);
           return kw ? keywordValue(kw) : '';
         })
         .filter(Boolean);
-      const result = await doInsertKeywords(labels);
+      await requireFileWritePermission();
+      const before = await resolvePageContext();
+      if (!mounted.current) {return;}
+      await requireFileReadPermission();
+      const keywordResponse = await withTimeout(
+        PluginFileAPI.getKeyWords(before.filePath, [before.pageNum]),
+        'Existing keyword lookup', API_TIMEOUT_MS,
+      ) as ApiRes<Array<{keyword: string; page: number}>>;
+      const existing = requireApiResult(keywordResponse, 'Could not check existing keywords');
+      if (!Array.isArray(existing) || existing.some(item => !item || typeof item.keyword !== 'string' || typeof item.page !== 'number')) {
+        throw new Error('Could not check existing keywords. Please try again.');
+      }
+      const indexed = new Set(existing.filter(item => item.page === before.pageNum).map(item => item.keyword));
+      if (!mounted.current) {return;}
+      const matches = labels.filter(label => indexed.has(label));
+      if (matches.length) {
+        const choice = await new Promise<DuplicateChoice>(resolve => setDuplicates({labels: matches, resolve}));
+        setDuplicates(null);
+        if (!mounted.current || choice === 'cancel') {return;}
+        if (choice === 'skip') {
+          labels = labels.filter(label => !indexed.has(label));
+          if (!labels.length) {
+            setSelectedIds([]);
+            setError('All selected keywords are already indexed. Nothing was placed.');
+            return;
+          }
+        }
+      }
+      let point = {x: 0, y: 0};
+      if (before.filePath.toLowerCase().endsWith('.note')) {
+        const outcome = await new Promise<PlacementResult>(resolve => setPlacement({resolve}));
+        if (!mounted.current) {return;}
+        if (outcome.kind !== 'placed') {
+          setHidden(true);
+          PluginManager.closePluginView();
+          return;
+        }
+        point = outcome.point;
+      }
+      // The overlay continues owning input until the entire batch completes.
+      // Closing the host before insertion can suspend JS until it is reopened.
+      const current = await resolvePageContext();
+      if (!mounted.current) {return;}
+      if (current.filePath !== before.filePath || current.pageNum !== before.pageNum ||
+          current.width !== before.width || current.height !== before.height) {
+        throw new Error('Page or orientation changed. Please try again.');
+      }
+      const result = await doInsertKeywords(labels, current, point, indexed);
       const completed = new Set(result.completedLabels);
       setSelectedIds(prev =>
         prev.filter(id => {
@@ -450,11 +424,15 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
           `Inserted; index unchanged: ${result.indexWarnings.join(', ')}`,
         );
       } else {
+        setHidden(true);
         PluginManager.closePluginView();
       }
     } catch (caughtError) {
       showError(getErrorMessage(caughtError, 'Insert failed'));
     } finally {
+      setDuplicates(null);
+      setPlacement(null);
+      insertingRef.current = false;
       setInserting(false);
     }
   }, [inserting, selectedIds, keywords, showError]);
@@ -496,6 +474,9 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
 
   // ── Render ──
 
+  if (duplicates) {return <DuplicatePrompt request={duplicates} />;}
+  if (placement) {return <PlacementOverlay request={placement} />;}
+  if (hidden) {return <View style={{flex: 1, backgroundColor: 'transparent'}} />;}
   return (
     <Pressable style={styles.overlay} onPress={handleClose}>
       <KeyboardAvoidingView
@@ -711,6 +692,7 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
                 : `${selectedIds.length} selected`}
             </Text>
             <Pressable
+              testID="keyword-insert"
               onPress={handleInsertSelected}
               disabled={inserting || selectedIds.length === 0}
               style={({pressed}) => [
@@ -725,7 +707,7 @@ export default function KeywordPanel({keywords, groups, onManage}: Props) {
                   (inserting || selectedIds.length === 0) &&
                     styles.insertBtnTextDisabled,
                 ]}>
-                {inserting ? 'Inserting…' : 'Insert'}
+                {inserting ? 'Preparing…' : 'Insert'}
               </Text>
             </Pressable>
           </View>
@@ -749,6 +731,7 @@ function KeywordItem({
   return (
     <Pressable
       style={({pressed}) => [styles.item, pressed && styles.itemPressed]}
+      testID={`keyword-${kw.id}`}
       onPress={() => onToggleSelect(kw.id)}>
       <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
         {selected && <Text style={styles.checkmark}>{'✓'}</Text>}

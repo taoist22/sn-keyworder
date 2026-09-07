@@ -10,7 +10,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import {FileUtils} from 'sn-plugin-lib';
 import {getErrorMessage} from './apiSafety';
 import {getPanelMetrics} from './responsivePanel';
 import {requireFileReadPermission} from './pluginPermissions';
@@ -28,7 +27,6 @@ import {
 const PANEL_PADDING = 20;
 const ITEM_HEIGHT = 60;
 
-const IMPORT_DIR = '/storage/emulated/0/MyStyle/SnKeyworder';
 const IMPORT_URL =
   'file:///storage/emulated/0/MyStyle/SnKeyworder/keywords.json';
 const IMPORT_MSG_MS = 4000;
@@ -356,11 +354,6 @@ export default function ConfigPanel({
     setImportMsg(null);
     try {
       await requireFileReadPermission();
-      try {
-        await (FileUtils as any).makeDir(IMPORT_DIR);
-      } catch (error) {
-        console.warn('[ConfigPanel] Could not create import directory:', error);
-      }
       const response = await fetch(IMPORT_URL);
       if (!response.ok) {
         throw new Error('not_found');

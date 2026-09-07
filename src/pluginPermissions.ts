@@ -14,12 +14,13 @@ async function ensurePluginPermission(
     requestPermission?: (name: string, desc?: string) => Promise<number>;
   };
 
-  // Older firmware did not expose the permission bridge. Continue to support it.
+  // Publishing builds require firmware with the permission bridge. If it is
+  // unavailable, fail closed instead of attempting protected file operations.
   if (
     typeof manager.hasPermission !== 'function' ||
     typeof manager.requestPermission !== 'function'
   ) {
-    return true;
+    return false;
   }
 
   const pending = pendingRequests.get(permission);
@@ -51,7 +52,7 @@ async function ensurePluginPermission(
 export async function requireFileReadPermission(): Promise<void> {
   const allowed = await ensurePluginPermission(
     FILE_READ_PERMISSION,
-    'Allow Keyworder to import a keyword list from shared storage.',
+    'Allow Keyworder to check existing page keywords and import keyword lists from shared storage.',
   );
   if (!allowed) {
     throw new Error('File read access was not allowed.');

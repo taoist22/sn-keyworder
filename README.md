@@ -8,7 +8,8 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 
 ## Features
 
-- **Multi-keyword insertion** — check any number of keywords and insert them all in one tap; each keyword lands as a separate, movable element in wrapped rows near the bottom of the page
+- **Tap to place a batch** — select keywords, press Insert, then tap the note once to place them as separate, movable elements in wrapped rows
+- **Duplicate review before placement** — skip keywords already indexed on the page, place their labels again without duplicate index entries, or cancel
 - **Selection to add keyword** — lasso handwritten or typed text in notes, or select text in PDFs/EPUBs, then tap the Keyworder button and save it directly to your keyword list; works with OCR for handwriting
 - **Native index integration** — automatically adds each keyword to the device's built-in keyword index for page navigation
 - **In-plugin keyword management** — add, delete, and pin keywords directly from the plugin; changes persist automatically
@@ -22,7 +23,7 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 
 ## Installation
 
-1. Download `Keyworder.snplg` from the [v1.3.9-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.3.9-beta).
+1. Download `Keyworder.snplg` from the [v1.5.0-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.5.0-beta).
 2. Connect your Supernote to your computer using the Supernote Partner app or Browse & Access.
 3. Copy `Keyworder.snplg` into the `MyStyle` folder on your device.
 4. On your Supernote, open a note, tap the **plugin icon** in the toolbar, go to **Manage Plugins**, tap **Add Plugin**, and select `Keyworder`.
@@ -37,7 +38,7 @@ Keywords are managed entirely within the plugin — no external tools or file tr
 2. Tap **+ Add**, type your keyword, and optionally add a short key such as `course`, `topic`, `status`, or `ACC201`. The add panel previews the saved value before you confirm.
 3. The keyword is saved immediately and will be there the next time you open the plugin. If a structured key is present, Keyworder inserts it as `key:value`.
 
-Keys keep the capitalization you enter, so `ACC201` displays and inserts as `ACC201:keyword`. Duplicate checks are still case-insensitive.
+Keys keep the capitalization you enter, so `ACC201` displays and inserts as `ACC201:keyword`. Duplicate checks when saving keywords to your list are case-insensitive.
 
 Structured keys are different from groups:
 
@@ -97,7 +98,7 @@ You can import a large list of keywords at once by dropping a JSON file onto you
    ```
    MyStyle/SnKeyworder/keywords.json
    ```
-   The `SnKeyworder` folder is created automatically the first time you tap Import.
+   Create the `SnKeyworder` folder first if it does not already exist.
 3. Open Keyworder, tap **Manage**, then tap **Import**.
 4. New keywords are merged in — any matching `key:value` combination already in your list is skipped.
 
@@ -109,7 +110,24 @@ The Manage screen includes the same right-side A-Z rail as the main keyword pick
 
 1. Open a note and tap the **plugin icon** in the toolbar.
 2. Tap one or more keywords to check them. Use **All**, **Pinned**, group filters, or the right-side A-Z rail to narrow the list. **Select Pinned** or **Select Group** appears only after you choose a filtered view.
-3. Tap **Insert**. Each keyword is stamped onto the page as a separate element in wrapped rows near the bottom — use lasso to move individual keywords to your desired locations. All inserted keywords are also added to the native keyword navigation index. Structured keywords are inserted and indexed as `key:value`, with no space after the colon.
+3. Tap **Insert**. Keyworder checks whether any selections are already indexed on this page. If a warning appears, choose **Skip duplicates**, **Place all**, or **Cancel**.
+4. When **Tap to place · 30 seconds** appears, tap the note where the first row should begin. One tap places the whole batch; rows wrap downward. The text is aligned to the tapped line, with placement tested on Nomad and Manta.
+
+Your current pen can remain selected: the placement overlay captures the tap without leaving a pen dot. Drags and long presses are ignored. **Cancel**, hardware **Back**, or the 30-second timeout closes placement without inserting anything.
+
+Near page edges, the batch shifts inward to fit. Very large batches are rejected before insertion; select fewer keywords. Each label remains separately movable. New keywords are added to the native keyword navigation index; structured keywords use `key:value`, with no space after the colon.
+
+### Reviewing duplicates
+
+The warning lists selected keywords already in the current page’s native index:
+
+- **Skip duplicates** places only new keywords. If none remain, Keyworder returns to the picker without asking for a tap.
+- **Place all** places all selected labels but skips index entries that already exist. Confirmed duplicates do not reopen the panel with a warning after placement.
+- **Cancel** returns to keyword selection without inserting anything.
+
+The check compares indexed keyword text; it does not scan handwriting or unindexed visible text. File-read permission is required. If the check fails, nothing is placed. Actual insertion or indexing failures still display a warning.
+
+In PDFs and EPUBs, the main picker continues to add keywords to the page index without placing visible labels or asking for a placement tap.
 
 Keyworder adjusts the insert location for Nomad and Manta screen dimensions, including synced notes created on the other device, so visible text should remain on-page while still being indexed in the native keyword navigation pane.
 
@@ -124,6 +142,17 @@ You can add a word or phrase to your keyword list directly from the page or docu
 3. Review or edit the pre-filled text in the **Add as Keyword** panel, then tap **Add**.
 4. The keyword is saved to your list and registered in the native keyword index for the current page. The plugin returns to the main keyword panel.
 
+## Permissions and privacy
+
+- **File read** is requested before insertion to check the current page’s keyword index, and when you import `MyStyle/SnKeyworder/keywords.json`. If access is denied or the check fails, insertion stops before placing anything.
+- **File write** is requested when you insert visible keyword labels or add
+  keywords to the current page's native keyword index.
+- Keyword lists and groups are stored in Keyworder's private on-device storage.
+- Keyworder makes no network requests and does not upload note content,
+  handwriting, selected text, keywords, or other user data. The optional
+  Keyword Builder is a separate browser tool; importing its downloaded JSON file
+  is a local file operation on the Supernote.
+
 ## Building from Source
 
 ### Prerequisites
@@ -136,12 +165,24 @@ You can add a word or phrase to your keyword list directly from the page or docu
 
 ```bash
 npm install
-JAVA_HOME=/path/to/your/jdk ./buildPlugin.sh
+rm -rf build/generated build/outputs
+JAVA_HOME=/path/to/your/jdk ANDROID_HOME=/path/to/android-sdk ./buildPlugin.sh
 ```
 
-The plugin file will be generated at `build/outputs/Keyworder.snplg`.
+The plugin file will be generated at `build/outputs/Keyworder.snplg`. Verify the package contains `app.npk`, its config points to `/app.npk`, and `reactPackages` includes `com.reactnativecommunity.asyncstorage.AsyncStoragePackage`. A completed JavaScript bundle alone is not a valid native build.
 
 > **Note:** The first build generates autolinking files; run the build command twice on a clean checkout to ensure `reactPackages` is correctly populated in the plugin config.
+
+## Changelog
+
+### 1.5.0-beta
+
+- Place a selected batch with one tap on the note, with wrapped rows and line alignment tested on Manta and Nomad.
+- Review existing page keywords before placement: Skip duplicates, Place all, or Cancel.
+- Reuse existing index entries when placing duplicate labels, avoiding the post-placement duplicate warning.
+- Cancel placement with the banner, hardware Back, or timeout; reject placement if the page or orientation changes.
+- Preserve index-only insertion for PDF/EPUB pages.
+- Require the firmware permission bridge; check file-read access before duplicate lookup and import.
 
 ## License
 
