@@ -1,7 +1,7 @@
 {
   "name": "Keyworder",
-  "version": "1.4.4-tap-beta",
-  "description": "Tag the current Supernote page with a keyword from your personal list \u2014 one tap, zero lasso.",
+  "version": "1.5.0-beta",
+  "description": "Tag the current Supernote page with a keyword from your personal list — one tap, zero lasso.",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
