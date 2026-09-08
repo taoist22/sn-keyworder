@@ -25,7 +25,7 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 
 ## Installation
 
-1. Download `Keyworder.snplg` from the [v1.5.0-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.5.0-beta).
+1. Download `Keyworder.snplg` from the [v1.6.0-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.6.0-beta).
 2. Connect your Supernote to your computer using the Supernote Partner app or Browse & Access.
 3. Copy `Keyworder.snplg` into the `MyStyle` folder on your device.
 4. On your Supernote, open a note, tap the **plugin icon** in the toolbar, go to **Manage Plugins**, tap **Add Plugin**, and select `Keyworder`.
@@ -211,7 +211,7 @@ The plugin file will be generated at `build/outputs/Keyworder.snplg`. Verify the
 
 ## Changelog
 
-### Unreleased
+### 1.6.0-beta
 
 - Fixed keyword names being truncated, or disappearing entirely, in Manage Keywords. Worst on keywords belonging to several groups; severe on Nomad.
 - Panels are now sized correctly per device. The sizing calculation compared a screen width in dp against a threshold written in pixels, so no device ever matched it and the Manta was given a Nomad-sized panel.
