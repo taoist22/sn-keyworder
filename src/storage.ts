@@ -165,3 +165,17 @@ export async function saveKeywordGroups(groups: KeywordGroup[]): Promise<void> {
 export function makeId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
+
+// Groups worth showing the user. `normalizeKeyword` folds a keyword's
+// structured key into its groups on load, so a keyword whose only "group" is
+// its own key would otherwise read as grouped, and the key would be listed
+// twice. Display-only: the stored data is untouched.
+export function displayGroups(
+  keyword: Pick<Keyword, 'groups' | 'key'>,
+): string[] {
+  const key = normalizeKey(keyword.key);
+  const groups = normalizeGroups(keyword.groups);
+  return key
+    ? groups.filter(group => group.toLowerCase() !== key.toLowerCase())
+    : groups;
+}

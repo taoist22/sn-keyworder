@@ -22,7 +22,7 @@ import {
   requireApiResult,
   withTimeout,
 } from './apiSafety';
-import {Keyword, KeywordGroup, keywordValue} from './storage';
+import {Keyword, KeywordGroup, displayGroups, keywordValue} from './storage';
 import {getPanelMetrics} from './responsivePanel';
 import {requireFileReadPermission, requireFileWritePermission} from './pluginPermissions';
 import DuplicatePrompt, {type DuplicateRequest, type DuplicateChoice} from './DuplicatePrompt';
@@ -33,7 +33,8 @@ import {subscribeToButtonEvents} from './pluginRouter';
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const PANEL_PADDING = 20;
-const ITEM_HEIGHT = 58;
+// Tall enough for the label plus both meta lines at their larger sizes.
+const ITEM_HEIGHT = 76;
 const ERROR_DISPLAY_MS = 2500;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -728,6 +729,9 @@ function KeywordItem({
   selected: boolean;
   onToggleSelect: (id: string) => void;
 }) {
+  // The key already shows on its own line above, so drop the group that is
+  // just a copy of it.
+  const visibleGroups = displayGroups(kw);
   return (
     <Pressable
       style={({pressed}) => [styles.item, pressed && styles.itemPressed]}
@@ -737,15 +741,17 @@ function KeywordItem({
         {selected && <Text style={styles.checkmark}>{'✓'}</Text>}
       </View>
       <View style={styles.itemTextWrap}>
-        <Text style={styles.itemText}>{kw.label}</Text>
+        <Text style={styles.itemText} numberOfLines={1}>
+          {kw.label}
+        </Text>
         {kw.key != null && (
-          <Text style={styles.itemMeta}>
+          <Text style={styles.itemMeta} numberOfLines={1}>
             {kw.key}:{kw.label}
           </Text>
         )}
-        {(kw.groups ?? []).length > 0 && (
+        {visibleGroups.length > 0 && (
           <Text style={styles.itemMeta} numberOfLines={1}>
-            {(kw.groups ?? []).join(', ')}
+            {visibleGroups.join(', ')}
           </Text>
         )}
       </View>
@@ -989,17 +995,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F0',
   },
   itemText: {
-    fontSize: 16,
+    fontSize: 19,
     color: '#000000',
     fontWeight: '500',
   },
   itemTextWrap: {
     flex: 1,
+    minWidth: 0,
   },
   itemMeta: {
-    marginTop: 1,
-    fontSize: 10,
-    color: '#777777',
+    // Was 10pt in #777777, which on the Manta's 0.85 fontScale rendered at
+    // ~8.5dp of light grey -- unreadable on e-ink.
+    marginTop: 2,
+    fontSize: 13,
+    color: '#4A4A4A',
     fontWeight: '600',
   },
   // Selection tools

@@ -16,6 +16,7 @@ import {requireFileReadPermission} from './pluginPermissions';
 import {
   Keyword,
   KeywordGroup,
+  displayGroups,
   keywordSignature,
   makeId,
   normalizeGroups,
@@ -30,6 +31,9 @@ const ITEM_HEIGHT = 60;
 const IMPORT_URL =
   'file:///storage/emulated/0/MyStyle/SnKeyworder/keywords.json';
 const IMPORT_MSG_MS = 4000;
+// Longer than the import toast: undo is the only safety net on delete, and a
+// full e-ink refresh plus noticing the banner eats several seconds.
+const UNDO_MS = 9000;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -139,7 +143,7 @@ export default function ConfigPanel({
       clearTimeout(undoTimerRef.current);
     }
     setUndoAction(action);
-    undoTimerRef.current = setTimeout(() => setUndoAction(null), IMPORT_MSG_MS);
+    undoTimerRef.current = setTimeout(() => setUndoAction(null), UNDO_MS);
   }, []);
 
   const showImportMsg = useCallback((msg: string) => {
@@ -664,7 +668,10 @@ export default function ConfigPanel({
 
               {/* ── Add input ── */}
               {adding && (
-                <>
+                <View style={styles.editorCard}>
+                  <Text style={styles.editorTitle}>
+                    {editingId != null ? 'Edit keyword' : 'New keyword'}
+                  </Text>
                   <View style={styles.addRow}>
                     <View style={styles.addField}>
                       <Text style={styles.inputLabel}>Keyword</Text>
@@ -778,8 +785,7 @@ export default function ConfigPanel({
                       </Pressable>
                     </View>
                   )}
-                  <View style={styles.lightDivider} />
-                </>
+                </View>
               )}
 
               {/* ── Keyword list ── */}
@@ -1051,7 +1057,7 @@ function ConfigItem({
   onEdit: (keyword: Keyword) => void;
   onTogglePin: (id: string) => void;
 }) {
-  const groupCount = (kw.groups ?? []).length;
+  const groupCount = displayGroups(kw).length;
   // Long-press the row to edit. Deliberately no delete control here: a
   // destructive tap target inside a whole-row gesture is easy to fire by
   // accident on e-ink, so delete lives in the editor instead. Pin stays --
@@ -1073,14 +1079,21 @@ function ConfigItem({
       </Text>
       {groupCount > 0 && (
         <View style={styles.flagBadge}>
-          <Text style={styles.flagBadgeText}>{`G${groupCount}`}</Text>
+          <Text allowFontScaling={false} style={styles.flagBadgeText}>
+            {`G${groupCount}`}
+          </Text>
         </View>
       )}
       {kw.key != null && (
         <View style={styles.flagBadge}>
-          <Text style={styles.flagBadgeText}>K</Text>
+          <Text allowFontScaling={false} style={styles.flagBadgeText}>
+            K
+          </Text>
         </View>
       )}
+      {/* Absorbs the slack so the badges sit next to the label rather than
+          being pushed to the far right of the cell. */}
+      <View style={styles.itemSpacer} />
     </Pressable>
   );
 }
@@ -1444,6 +1457,27 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: '#F8F8F8',
   },
+  // The editor sits directly above the keyword list, so it needs to read as a
+  // separate surface rather than as more list content.
+  editorCard: {
+    marginHorizontal: 10,
+    marginTop: 8,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: '#000000',
+    borderRadius: 8,
+    backgroundColor: '#F8F8F8',
+    paddingTop: 10,
+    paddingBottom: 4,
+    overflow: 'hidden',
+  },
+  editorTitle: {
+    paddingHorizontal: PANEL_PADDING,
+    paddingBottom: 8,
+    fontSize: 15,
+    color: '#000000',
+    fontWeight: '700',
+  },
   groupPickerRow: {
     paddingHorizontal: PANEL_PADDING,
     paddingBottom: 8,
@@ -1617,17 +1651,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pinIcon: {
-    fontSize: 22,
-    color: '#CCCCCC',
+    // Outline star for unpinned, filled for pinned. Both dark: the old
+    // #CCCCCC outline was near-invisible on e-ink.
+    fontSize: 24,
+    color: '#444444',
   },
   pinIconActive: {
     color: '#000000',
   },
   itemLabel: {
-    flex: 1,
+    // Sizes to its content and shrinks if it must, but does not grow: growing
+    // is what pushed the indicators out to the far right of the cell.
+    flexGrow: 0,
+    flexShrink: 1,
+    flexBasis: 'auto',
+    minWidth: 0,
     fontSize: 20,
     color: '#000000',
     fontWeight: '500',
+  },
+  itemSpacer: {
+    flex: 1,
   },
   // Fixed-width indicators. These replaced the old group/key chips, which
   // were sized by their content and could consume the whole row, leaving the
