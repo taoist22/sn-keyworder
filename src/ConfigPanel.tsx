@@ -102,6 +102,7 @@ export default function ConfigPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState('');
   const [newKey, setNewKey] = useState('');
+  const [newGroups, setNewGroups] = useState<string[]>([]);
   const [groupLetterFilter, setGroupLetterFilter] = useState<string | null>(
     null,
   );
@@ -157,6 +158,7 @@ export default function ConfigPanel({
     setEditingId(null);
     setNewLabel('');
     setNewKey('');
+    setNewGroups([]);
     setAddError(null);
   }, []);
 
@@ -291,6 +293,7 @@ export default function ConfigPanel({
     setEditingId(null);
     setNewLabel('');
     setNewKey('');
+    setNewGroups([]);
     setAddError(null);
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
@@ -300,8 +303,18 @@ export default function ConfigPanel({
     setEditingId(keyword.id);
     setNewLabel(keyword.label);
     setNewKey(keyword.key ?? '');
+    setNewGroups(normalizeGroups(keyword.groups));
     setAddError(null);
     setTimeout(() => inputRef.current?.focus(), 50);
+  }, []);
+
+  const handleToggleDraftGroup = useCallback((groupName: string) => {
+    setNewGroups(prev =>
+      prev.some(item => item.toLowerCase() === groupName.toLowerCase())
+        ? prev.filter(item => item.toLowerCase() !== groupName.toLowerCase())
+        : normalizeGroups([prev, groupName]),
+    );
+    setAddError(null);
   }, []);
 
   const handleConfirmSave = useCallback(async () => {
@@ -314,7 +327,7 @@ export default function ConfigPanel({
     const previousKeyword = editingId
       ? keywords.find(k => k.id === editingId)
       : null;
-    const keywordGroups = normalizeGroups(previousKeyword?.groups);
+    const keywordGroups = normalizeGroups(newGroups);
     const nextKeyword = {
       id: editingId ?? makeId(),
       label,
@@ -340,7 +353,7 @@ export default function ConfigPanel({
     } catch (error) {
       setAddError(getErrorMessage(error, 'Could not save keyword'));
     }
-  }, [newLabel, editingId, newKey, keywords, onUpdate, resetForm]);
+  }, [newLabel, editingId, newKey, newGroups, keywords, onUpdate, resetForm]);
 
   const handleCancelAdd = useCallback(() => {
     resetForm();
@@ -617,7 +630,7 @@ export default function ConfigPanel({
             <>
               <View style={styles.legendRow}>
                 <Text style={styles.legendText}>
-                  {'★ pin   Edit   ✕ delete'}
+                  {'★ pin   ·   long press to edit or delete'}
                 </Text>
                 <Pressable
                   onPress={handleImport}
@@ -705,6 +718,37 @@ export default function ConfigPanel({
                       <Text style={styles.addCancelText}>{'✕'}</Text>
                     </Pressable>
                   </View>
+                  {groups.length > 0 && (
+                    <View style={styles.groupPickerRow}>
+                      <Text style={styles.inputLabel}>Groups</Text>
+                      <View style={styles.groupPickerWrap}>
+                        {groups.map(group => {
+                          const selected = newGroups.some(
+                            item =>
+                              item.toLowerCase() === group.name.toLowerCase(),
+                          );
+                          return (
+                            <Pressable
+                              key={group.id}
+                              onPress={() => handleToggleDraftGroup(group.name)}
+                              style={({pressed}) => [
+                                styles.groupPickerChip,
+                                selected && styles.groupPickerChipActive,
+                                pressed && styles.btnPressed,
+                              ]}>
+                              <Text
+                                style={[
+                                  styles.groupPickerChipText,
+                                  selected && styles.groupPickerChipTextActive,
+                                ]}>
+                                {group.name}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  )}
                   {addPreview !== '' && (
                     <View style={styles.previewRow}>
                       <Text style={styles.previewLabel}>Inserts as</Text>
@@ -714,6 +758,24 @@ export default function ConfigPanel({
                   {addError != null && (
                     <View style={styles.addErrorBanner}>
                       <Text style={styles.addErrorText}>{addError}</Text>
+                    </View>
+                  )}
+                  {editingId != null && (
+                    <View style={styles.editDeleteRow}>
+                      <Pressable
+                        onPress={() => {
+                          const id = editingId;
+                          resetForm();
+                          handleDelete(id);
+                        }}
+                        style={({pressed}) => [
+                          styles.editDeleteBtn,
+                          pressed && styles.btnPressed,
+                        ]}>
+                        <Text style={styles.editDeleteText}>
+                          Delete keyword
+                        </Text>
+                      </Pressable>
                     </View>
                   )}
                   <View style={styles.lightDivider} />
@@ -752,7 +814,6 @@ export default function ConfigPanel({
                           kw={item}
                           onEdit={handleStartEdit}
                           onTogglePin={handleTogglePin}
-                          onDelete={handleDelete}
                         />
                       </View>
                     )}
@@ -985,15 +1046,21 @@ function ConfigItem({
   kw,
   onEdit,
   onTogglePin,
-  onDelete,
 }: {
   kw: Keyword;
   onEdit: (keyword: Keyword) => void;
   onTogglePin: (id: string) => void;
-  onDelete: (id: string) => void;
 }) {
+  const groupCount = (kw.groups ?? []).length;
+  // Long-press the row to edit. Deliberately no delete control here: a
+  // destructive tap target inside a whole-row gesture is easy to fire by
+  // accident on e-ink, so delete lives in the editor instead. Pin stays --
+  // a mis-fired pin is harmless and undone by tapping again.
   return (
-    <View style={styles.item}>
+    <Pressable
+      onLongPress={() => onEdit(kw)}
+      delayLongPress={400}
+      style={({pressed}) => [styles.item, pressed && styles.itemPressed]}>
       <Pressable
         onPress={() => onTogglePin(kw.id)}
         style={({pressed}) => [styles.pinBtn, pressed && styles.btnPressed]}>
@@ -1004,36 +1071,17 @@ function ConfigItem({
       <Text style={styles.itemLabel} numberOfLines={1}>
         {kw.label}
       </Text>
+      {groupCount > 0 && (
+        <View style={styles.flagBadge}>
+          <Text style={styles.flagBadgeText}>{`G${groupCount}`}</Text>
+        </View>
+      )}
       {kw.key != null && (
-        <View style={styles.keyBadge}>
-          <Text style={styles.keyBadgeText}>{kw.key}</Text>
+        <View style={styles.flagBadge}>
+          <Text style={styles.flagBadgeText}>K</Text>
         </View>
       )}
-      {(kw.groups ?? []).length > 0 && (
-        <View style={styles.groupBadgeWrap}>
-          {(kw.groups ?? []).slice(0, 2).map(group => (
-            <View key={group} style={styles.groupBadge}>
-              <Text style={styles.groupBadgeText}>{group}</Text>
-            </View>
-          ))}
-          {(kw.groups ?? []).length > 2 && (
-            <Text style={styles.groupMoreText}>
-              +{(kw.groups ?? []).length - 2}
-            </Text>
-          )}
-        </View>
-      )}
-      <Pressable
-        onPress={() => onEdit(kw)}
-        style={({pressed}) => [styles.editBtn, pressed && styles.btnPressed]}>
-        <Text style={styles.editBtnText}>Edit</Text>
-      </Pressable>
-      <Pressable
-        onPress={() => onDelete(kw.id)}
-        style={({pressed}) => [styles.deleteBtn, pressed && styles.btnPressed]}>
-        <Text style={styles.deleteBtnText}>{'✕'}</Text>
-      </Pressable>
-    </View>
+    </Pressable>
   );
 }
 
@@ -1396,6 +1444,55 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: '#F8F8F8',
   },
+  groupPickerRow: {
+    paddingHorizontal: PANEL_PADDING,
+    paddingBottom: 8,
+    backgroundColor: '#F8F8F8',
+  },
+  groupPickerWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 4,
+  },
+  groupPickerChip: {
+    borderWidth: 1.5,
+    borderColor: '#BBBBBB',
+    borderRadius: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  groupPickerChipActive: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  groupPickerChipText: {
+    fontSize: 13,
+    color: '#555555',
+    fontWeight: '700',
+  },
+  groupPickerChipTextActive: {
+    color: '#FFFFFF',
+  },
+  editDeleteRow: {
+    flexDirection: 'row',
+    paddingHorizontal: PANEL_PADDING,
+    paddingBottom: 10,
+    backgroundColor: '#F8F8F8',
+  },
+  editDeleteBtn: {
+    borderWidth: 1.5,
+    borderColor: '#999999',
+    borderRadius: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  editDeleteText: {
+    fontSize: 13,
+    color: '#444444',
+    fontWeight: '700',
+  },
   previewLabel: {
     fontSize: 12,
     color: '#777777',
@@ -1509,6 +1606,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: PANEL_PADDING,
     gap: 12,
   },
+  itemPressed: {
+    backgroundColor: '#EEEEEE',
+  },
   pinBtn: {
     width: 36,
     height: 36,
@@ -1529,53 +1629,19 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontWeight: '500',
   },
-  keyBadge: {
-    maxWidth: 96,
+  // Fixed-width indicators. These replaced the old group/key chips, which
+  // were sized by their content and could consume the whole row, leaving the
+  // label with nothing.
+  flagBadge: {
+    minWidth: 26,
     borderWidth: 1,
-    borderColor: '#777777',
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-  },
-  keyBadgeText: {
-    fontSize: 12,
-    color: '#555555',
-    fontWeight: '700',
-  },
-  groupBadgeWrap: {
-    maxWidth: 132,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  groupBadge: {
-    maxWidth: 58,
-    borderWidth: 1,
-    borderColor: '#BBBBBB',
+    borderColor: '#999999',
     borderRadius: 4,
     paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  groupBadgeText: {
-    fontSize: 10,
-    color: '#666666',
-    fontWeight: '700',
-  },
-  groupMoreText: {
-    fontSize: 10,
-    color: '#777777',
-    fontWeight: '700',
-  },
-  editBtn: {
-    height: 34,
-    borderRadius: 5,
-    borderWidth: 1.5,
-    borderColor: '#BBBBBB',
+    paddingVertical: 3,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
   },
-  editBtnText: {
+  flagBadgeText: {
     fontSize: 12,
     color: '#555555',
     fontWeight: '700',
