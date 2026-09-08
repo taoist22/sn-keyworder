@@ -18,7 +18,9 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 - **Pinned keywords** — keep your most-used keywords at the top of the list for zero-scroll access
 - **Structured keywords** — optionally save a keyword with a short key so it inserts as `key:value` for tools such as sn-query; key capitalization is preserved for display and insertion
 - **Keyword views** — filter the picker by pinned keywords or by group, then select the filtered view when you want a batch
-- **Responsive Nomad and Manta layout** — larger, denser panels with compact two-column keyword lists on supported screen sizes
+- **Long-press to edit** — long-press any keyword in Manage Keywords to change its text, structured key, or group membership, or to delete it
+- **At-a-glance indicators** — compact `G2` and `K` badges show group membership and structured keys without crowding out the keyword name
+- **Responsive Nomad and Manta layout** — the panel sizes itself to the device, and the keyword list uses two columns only when a row still has room for the keyword name: two columns on Manta, one on Nomad
 - **A-Z letter rail** — filter the Keyword, Manage Keywords, and Manage Groups screens by first letter using the vertical rail on the right side of the list
 
 ## Installation
@@ -32,10 +34,25 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 
 Keywords are managed entirely within the plugin — no external tools or file transfers needed.
 
+### Reading the keyword list
+
+Each row in the Manage screen shows the keyword, then up to two small indicators:
+
+| Indicator | Meaning |
+| --- | --- |
+| `G2` | The keyword belongs to 2 groups. The number is the group count. |
+| `K` | The keyword has a structured key, so it inserts as `key:value`. |
+
+Long-press the row to see or change the actual group names and key.
+
+The indicators are deliberately small and fixed-width so that long keyword names stay readable. Earlier versions listed group names in full on each row, which on smaller panels could push the keyword name off the row entirely.
+
+A keyword whose only group is a copy of its own structured key is not counted in `G`. That group is created automatically, and counting it would duplicate what `K` already tells you.
+
 ### Adding a keyword
 
 1. Open Keyworder and tap **Manage** in the header.
-2. Tap **+ Add**, type your keyword, and optionally add a short key such as `course`, `topic`, `status`, or `ACC201`. The add panel previews the saved value before you confirm.
+2. Tap **+ Add**, type your keyword, and optionally add a short key such as `course`, `topic`, `status`, or `ACC201`. If you have groups, you can tick them here too. The add panel previews the saved value before you confirm.
 3. The keyword is saved immediately and will be there the next time you open the plugin. If a structured key is present, Keyworder inserts it as `key:value`.
 
 Keys keep the capitalization you enter, so `ACC201` displays and inserts as `ACC201:keyword`. Duplicate checks when saving keywords to your list are case-insensitive.
@@ -47,11 +64,28 @@ Structured keys are different from groups:
 
 ### Pinning a keyword
 
-In the Manage screen, tap the **pin icon** next to any keyword to move it to the Pinned section at the top of the list for quick access.
+In the Manage screen, tap the **star** at the left of any keyword to move it to the Pinned section at the top of the list for quick access. A hollow star (☆) means unpinned, a filled star (★) means pinned. Tap it again to unpin.
+
+### Editing a keyword
+
+**Long-press** any keyword in the Manage screen to open its editor. From there you can:
+
+- change the keyword text
+- add, change, or clear its structured key
+- tick the groups it belongs to
+- delete it
+
+Tap **✓** to save or **✕** to cancel. The editor opens as a bordered card above the list.
+
+Group membership can be set from either direction: from a keyword's editor here, or from the **Groups** tab by selecting a group and ticking its members.
 
 ### Deleting a keyword
 
-In the Manage screen, tap the **delete icon** next to the keyword you want to remove.
+Long-press the keyword to open its editor, then tap **Delete keyword**.
+
+Deleting is undoable. An **Undo** banner appears at the top of the Manage screen for about nine seconds and restores the keyword to its original position in the list.
+
+There is deliberately no delete button on the keyword rows themselves: the rows respond to a long press, and a destructive control sitting inside a whole-row gesture is easy to trigger by accident.
 
 ### Creating groups
 
@@ -69,6 +103,8 @@ When a group is selected:
 - **All** toggles between current members and all available keywords.
 - Letter buttons filter whichever view is currently active.
 - Checked keywords are members of the selected group.
+
+You can also work from the other direction: long-press a keyword on the **Keywords** tab and tick its groups in the editor.
 
 ### Bulk importing keywords
 
@@ -174,6 +210,18 @@ The plugin file will be generated at `build/outputs/Keyworder.snplg`. Verify the
 > **Note:** The first build generates autolinking files; run the build command twice on a clean checkout to ensure `reactPackages` is correctly populated in the plugin config.
 
 ## Changelog
+
+### Unreleased
+
+- Fixed keyword names being truncated, or disappearing entirely, in Manage Keywords. Worst on keywords belonging to several groups; severe on Nomad.
+- Panels are now sized correctly per device. The sizing calculation compared a screen width in dp against a threshold written in pixels, so no device ever matched it and the Manta was given a Nomad-sized panel.
+- The keyword list now uses two columns only when a row still has room for the keyword name: two on Manta, one on Nomad.
+- Group and key chips on each row replaced with compact `G{n}` and `K` indicators, so the keyword name keeps the space.
+- Long-press a keyword to edit it. The editor now also sets group membership, which previously could only be done from the Groups tab.
+- Delete moved off the row and into the editor, so a stray long press cannot trigger it. The Undo window is now nine seconds.
+- Darkened the unpinned star, which was nearly invisible on e-ink.
+- Larger, darker key and group lines beneath each keyword on the main panel.
+- A group that merely duplicates a keyword's own structured key is no longer shown or counted.
 
 ### 1.5.0-beta
 
