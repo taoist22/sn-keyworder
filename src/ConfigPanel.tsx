@@ -1590,8 +1590,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   keywordGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    // No flexDirection/flexWrap here on purpose. This used to be a manual
+    // wrapping row grid layered on top of numColumns, which ignored the
+    // column count: with numColumns={1} FlatList gives each item a
+    // content-sized cell wrapper, so itemCell's width:'100%' resolved
+    // against that wrapper and two rows sat side by side anyway. Let
+    // numColumns do the work, exactly as KeywordPanel does.
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
