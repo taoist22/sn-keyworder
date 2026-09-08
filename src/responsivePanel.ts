@@ -12,6 +12,18 @@ export type PanelMetrics = {
 // matched it: the Manta reports 1024 and was handed a Nomad-sized panel.
 const WIDE_MIN_WIDTH_DP = 900;
 
+// Both panels reserve a 30dp A-Z rail beside the list.
+const ALPHA_RAIL_DP = 30;
+
+// What one keyword row needs before its label starts starving. Pin button
+// (36), the two indicators (26 each), the gaps between them (48), row padding
+// (40) and two-column cell padding (8) come to ~184dp of chrome, so a usable
+// label wants ~340dp of row. Below that, a second column costs more in
+// truncation than it returns in density -- which is what the Nomad hit: a
+// 2-column split left it ~115dp of label, and at fontScale 1.0 (against the
+// Manta's 0.85) its text renders ~18% larger on top of that.
+const MIN_ROW_WIDTH_DP = 340;
+
 export function getPanelMetrics(
   screenWidth: number,
   screenHeight: number,
@@ -28,10 +40,9 @@ export function getPanelMetrics(
       : Math.min(900, screenHeight * 0.78),
   );
 
-  return {
-    width,
-    height,
-    isWide,
-    columns: width >= 560 ? 2 : 1,
-  };
+  // Columns follow whether a row actually fits, not whether the panel is wide.
+  const listWidth = width - ALPHA_RAIL_DP;
+  const columns: 1 | 2 = listWidth >= MIN_ROW_WIDTH_DP * 2 ? 2 : 1;
+
+  return {width, height, isWide, columns};
 }
