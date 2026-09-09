@@ -19,13 +19,13 @@ https://github.com/user-attachments/assets/c61e4b78-69de-432d-8114-107f0b865d02
 - **Structured keywords** — optionally save a keyword with a short key so it inserts as `key:value` for tools such as sn-query; key capitalization is preserved for display and insertion
 - **Keyword views** — filter the picker by pinned keywords or by group, then select the filtered view when you want a batch
 - **Long-press to edit** — long-press any keyword in Manage Keywords to change its text, structured key, or group membership, or to delete it
-- **At-a-glance indicators** — compact `G2` and `K` badges show group membership and structured keys without crowding out the keyword name
+- **At-a-glance indicators** — group counts and structured keys appear beneath the keyword name
 - **Responsive Nomad and Manta layout** — the panel sizes itself to the device, and the keyword list uses two columns only when a row still has room for the keyword name: two columns on Manta, one on Nomad
 - **A-Z letter rail** — filter the Keyword, Manage Keywords, and Manage Groups screens by first letter using the vertical rail on the right side of the list
 
 ## Installation
 
-1. Download `Keyworder.snplg` from the [v1.6.0-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.6.0-beta).
+1. Download `Keyworder.snplg` from the [v1.6.1-beta release](https://github.com/taoist22/sn-keyworder/releases/tag/v1.6.1-beta).
 2. Connect your Supernote to your computer using the Supernote Partner app or Browse & Access.
 3. Copy `Keyworder.snplg` into the `MyStyle` folder on your device.
 4. On your Supernote, open a note, tap the **plugin icon** in the toolbar, go to **Manage Plugins**, tap **Add Plugin**, and select `Keyworder`.
@@ -36,18 +36,18 @@ Keywords are managed entirely within the plugin — no external tools or file tr
 
 ### Reading the keyword list
 
-Each row in the Manage screen shows the keyword, then up to two small indicators:
+Each row in the Manage screen shows the keyword, with up to two small indicators beneath it:
 
 | Indicator | Meaning |
 | --- | --- |
-| `G2` | The keyword belongs to 2 groups. The number is the group count. |
-| `K` | The keyword has a structured key, so it inserts as `key:value`. |
+| `2 groups` | The keyword belongs to 2 groups. The number is the group count. |
+| `Project` (example) | The actual structured key, so the keyword inserts as `Project:value`. |
 
 Long-press the row to see or change the actual group names and key.
 
-The indicators are deliberately small and fixed-width so that long keyword names stay readable. Earlier versions listed group names in full on each row, which on smaller panels could push the keyword name off the row entirely.
+The indicators sit below the keyword so they do not reduce its available width. Long structured keys can wrap.
 
-A keyword whose only group is a copy of its own structured key is not counted in `G`. That group is created automatically, and counting it would duplicate what `K` already tells you.
+A group matching the keyword's structured key is excluded from the displayed count, since the key is already shown separately.
 
 ### Adding a keyword
 
@@ -210,6 +210,13 @@ The plugin file will be generated at `build/outputs/Keyworder.snplg`. Verify the
 > **Note:** The first build generates autolinking files; run the build command twice on a clean checkout to ensure `reactPackages` is correctly populated in the plugin config.
 
 ## Changelog
+
+### 1.6.1-beta
+
+- Group counts now read “1 group” / “2 groups”, and the actual structured key replaces the `K` badge.
+- Both indicators appear beneath the keyword, preserving space for its name. Long keys can wrap.
+- Removed group memberships stay removed after reload, including groups matching a structured key. Legacy records still migrate.
+- Undoing a group deletion restores its memberships without discarding subsequent keyword edits or additions.
 
 ### 1.6.0-beta
 
