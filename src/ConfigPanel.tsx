@@ -1101,29 +1101,29 @@ function ConfigItem({
           {kw.pinned ? '★' : '☆'}
         </Text>
       </Pressable>
-      <Text style={styles.itemLabel} numberOfLines={1}>
-        {kw.label}
-      </Text>
-      {groupCount > 0 && (
-        <View style={styles.flagBadge}>
-          <Text allowFontScaling={false} style={styles.flagBadgeText}>
-            {`${groupCount} ${groupCount === 1 ? 'group' : 'groups'}`}
-          </Text>
-        </View>
-      )}
-      {kw.key != null && (
-        <View style={styles.flagBadge}>
-          <Text
-            allowFontScaling={false}
-            numberOfLines={1}
-            style={styles.flagBadgeText}>
-            {kw.key}
-          </Text>
-        </View>
-      )}
-      {/* Absorbs the slack so the badges sit next to the label rather than
-          being pushed to the far right of the cell. */}
-      <View style={styles.itemSpacer} />
+      <View style={styles.itemTextWrap}>
+        <Text style={styles.itemLabel} numberOfLines={1}>
+          {kw.label}
+        </Text>
+        {(groupCount > 0 || kw.key != null) && (
+          <View style={styles.itemMetadata}>
+            {groupCount > 0 && (
+              <View style={styles.flagBadge}>
+                <Text allowFontScaling={false} style={styles.flagBadgeText}>
+                  {`${groupCount} ${groupCount === 1 ? 'group' : 'groups'}`}
+                </Text>
+              </View>
+            )}
+            {kw.key != null && (
+              <View style={styles.flagBadge}>
+                <Text allowFontScaling={false} style={styles.flagBadgeText}>
+                  {kw.key}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
     </Pressable>
   );
 }
@@ -1668,7 +1668,8 @@ const styles = StyleSheet.create({
 
   // Item
   item: {
-    height: ITEM_HEIGHT,
+    minHeight: ITEM_HEIGHT,
+    paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: PANEL_PADDING,
@@ -1693,24 +1694,25 @@ const styles = StyleSheet.create({
   pinIconActive: {
     color: '#000000',
   },
-  itemLabel: {
-    // Sizes to its content and shrinks if it must, but does not grow: growing
-    // is what pushed the indicators out to the far right of the cell.
-    flexGrow: 0,
-    flexShrink: 1,
-    flexBasis: 'auto',
+  itemTextWrap: {
+    flex: 1,
     minWidth: 0,
+  },
+  itemLabel: {
     fontSize: 20,
     color: '#000000',
     fontWeight: '500',
   },
-  itemSpacer: {
-    flex: 1,
+  itemMetadata: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
   },
-  // Keep long structured keys from consuming the keyword row.
   flagBadge: {
     minWidth: 26,
-    maxWidth: '30%',
+    maxWidth: '100%',
     borderWidth: 1,
     borderColor: '#999999',
     borderRadius: 4,
