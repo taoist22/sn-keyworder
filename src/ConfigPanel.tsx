@@ -86,7 +86,7 @@ type UndoAction =
       kind: 'group';
       item: KeywordGroup;
       index: number;
-      keywordsBefore: Keyword[];
+      memberIds: string[];
     };
 
 export default function ConfigPanel({
@@ -470,7 +470,13 @@ export default function ConfigPanel({
           kind: 'group',
           item: group,
           index: groupIndex,
-          keywordsBefore: keywords,
+          memberIds: keywords
+            .filter(keyword =>
+              (keyword.groups ?? []).some(
+                name => name.toLowerCase() === group.name.toLowerCase(),
+              ),
+            )
+            .map(keyword => keyword.id),
         });
         if (selectedGroupId === group.id) {
           setSelectedGroupId(null);
@@ -501,16 +507,37 @@ export default function ConfigPanel({
     try {
       if (action.kind === 'keyword') {
         const restored = [...keywords];
-        restored.splice(Math.min(action.index, restored.length), 0, action.item);
-        await onUpdate(restored);
-      } else {
-        const restoredGroups = [...groups];
-        restoredGroups.splice(
-          Math.min(action.index, restoredGroups.length),
+        restored.splice(
+          Math.min(action.index, restored.length),
           0,
           action.item,
         );
-        await onUpdate(action.keywordsBefore);
+        await onUpdate(restored);
+      } else {
+        const restoredGroups = [...groups];
+        if (
+          !restoredGroups.some(
+            group =>
+              group.name.toLowerCase() === action.item.name.toLowerCase(),
+          )
+        ) {
+          restoredGroups.splice(
+            Math.min(action.index, restoredGroups.length),
+            0,
+            action.item,
+          );
+        }
+        const memberIds = new Set(action.memberIds);
+        await onUpdate(
+          keywords.map(keyword =>
+            memberIds.has(keyword.id)
+              ? {
+                  ...keyword,
+                  groups: normalizeGroups([keyword.groups, action.item.name]),
+                }
+              : keyword,
+          ),
+        );
         await onUpdateGroups(restoredGroups);
       }
       setUndoAction(null);
@@ -1080,14 +1107,17 @@ function ConfigItem({
       {groupCount > 0 && (
         <View style={styles.flagBadge}>
           <Text allowFontScaling={false} style={styles.flagBadgeText}>
-            {`G${groupCount}`}
+            {`${groupCount} ${groupCount === 1 ? 'group' : 'groups'}`}
           </Text>
         </View>
       )}
       {kw.key != null && (
         <View style={styles.flagBadge}>
-          <Text allowFontScaling={false} style={styles.flagBadgeText}>
-            K
+          <Text
+            allowFontScaling={false}
+            numberOfLines={1}
+            style={styles.flagBadgeText}>
+            {kw.key}
           </Text>
         </View>
       )}
@@ -1677,11 +1707,10 @@ const styles = StyleSheet.create({
   itemSpacer: {
     flex: 1,
   },
-  // Fixed-width indicators. These replaced the old group/key chips, which
-  // were sized by their content and could consume the whole row, leaving the
-  // label with nothing.
+  // Keep long structured keys from consuming the keyword row.
   flagBadge: {
     minWidth: 26,
+    maxWidth: '30%',
     borderWidth: 1,
     borderColor: '#999999',
     borderRadius: 4,

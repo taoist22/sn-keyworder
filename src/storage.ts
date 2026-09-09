@@ -102,11 +102,11 @@ function normalizeKeyword(item: any): Keyword | null {
     label,
     pinned: Boolean(item.pinned),
     key: normalizeKey(item.key),
-    groups: normalizeGroups([
-      ...normalizeGroups(item.groups),
-      ...normalizeGroups(item.group),
-      normalizeKey(item.key),
-    ]),
+    // Only migrate legacy records without an explicit membership list.
+    // An empty list is intentional and must survive a reload.
+    groups: Array.isArray(item.groups)
+      ? normalizeGroups(item.groups)
+      : normalizeGroups([item.groups, item.group, normalizeKey(item.key)]),
   };
 }
 
@@ -166,8 +166,8 @@ export function makeId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-// Groups worth showing the user. `normalizeKeyword` folds a keyword's
-// structured key into its groups on load, so a keyword whose only "group" is
+// Groups worth showing the user. Legacy records can include the structured
+// key in their groups, so a keyword whose only "group" is
 // its own key would otherwise read as grouped, and the key would be listed
 // twice. Display-only: the stored data is untouched.
 export function displayGroups(

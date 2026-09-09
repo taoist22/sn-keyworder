@@ -61,3 +61,30 @@ describe('displayGroups', () => {
     ]);
   });
 });
+
+describe('saved group membership', () => {
+  const storage = require('@react-native-async-storage/async-storage');
+  const {loadKeywords, saveKeywords} = require('../storage');
+
+  it('preserves explicit removals and does not resurrect a deleted key-named group', async () => {
+    const keywords = [
+      {id: 'a', label: 'Decision', key: 'Work', groups: [], pinned: false},
+    ];
+    storage.setItem.mockImplementation(async (_key: string, value: string) => {
+      storage.getItem.mockResolvedValue(value);
+    });
+    await saveKeywords(keywords);
+    const loaded = await loadKeywords();
+    expect(loaded).toEqual(keywords);
+    expect(mergeGroupNames([], loaded)).toEqual([]);
+  });
+
+  it('still migrates legacy records without a groups array', async () => {
+    storage.getItem.mockResolvedValue(
+      JSON.stringify([
+        {id: 'a', label: 'Decision', key: 'Work', group: 'Ideas'},
+      ]),
+    );
+    expect((await loadKeywords())[0].groups).toEqual(['Ideas', 'Work']);
+  });
+});
